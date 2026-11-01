@@ -1,0 +1,1 @@
+﻿"C:\Users\Cassmall\Desktop\CFR-NLHE-6max-test\native\hu20-buckets\target\release\hu20-buckets.exe" build --out C:\Users\Cassmall\Desktop\CFR-NLHE-6max-test\results\potential-r4-k10-i10-after --ranks 4 --ks 10 --iterations 10 --seed 202610050003 --abstraction potential
