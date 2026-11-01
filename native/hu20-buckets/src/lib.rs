@@ -678,6 +678,14 @@ where
     Ok(best)
 }
 
+#[cfg(test)]
+fn first_minimum_emd_reference(candidates: Vec<(u16, f32)>) -> (u16, f32) {
+    candidates
+        .into_iter()
+        .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
+        .expect("reference candidates must not be empty")
+}
+
 fn add_flow_edge(graph: &mut [Vec<FlowEdge>], from: usize, to: usize, capacity: f64, cost: f64) {
     let forward = FlowEdge {
         to,
@@ -951,6 +959,13 @@ pub enum EmdProgressEvent {
 
 pub type EmdProgressCallback = Arc<dyn Fn(EmdProgressEvent) + Send + Sync>;
 
+#[derive(Clone, Copy)]
+enum EmdAssignmentSelection {
+    Streaming,
+    #[cfg(test)]
+    VecReference,
+}
+
 /// Weighted k-means under L1 between rows (earth mover's distance for CDFs),
 /// with k-means++ seeding on a weighted sample and mean centroid updates.
 pub fn kmeans(
@@ -1152,6 +1167,34 @@ pub fn kmeans_emd_profiled(
     diagnose_final_assignment: bool,
     profile_enabled: bool,
 ) -> Result<ProfiledEmdClustering, EmdContextError> {
+    kmeans_emd_profiled_with_assignment(
+        points,
+        dim,
+        weight,
+        ground,
+        k,
+        seed,
+        max_iterations,
+        progress,
+        diagnose_final_assignment,
+        profile_enabled,
+        EmdAssignmentSelection::Streaming,
+    )
+}
+
+fn kmeans_emd_profiled_with_assignment(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    ground: &[f32],
+    k: usize,
+    seed: u64,
+    max_iterations: usize,
+    progress: Option<EmdProgressCallback>,
+    diagnose_final_assignment: bool,
+    profile_enabled: bool,
+    assignment_selection: EmdAssignmentSelection,
+) -> Result<ProfiledEmdClustering, EmdContextError> {
     let clustering_started = profile_enabled.then(Instant::now);
     let n = weight.len();
     assert!(
@@ -1181,12 +1224,19 @@ pub fn kmeans_emd_profiled(
             .map(|index| {
                 let point = row(index);
                 let mut emd_calls = 0usize;
-                let result = first_minimum_emd((0..k).map(|cluster| {
+                let candidates = (0..k).map(|cluster| {
                     let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
                     emd_calls += 1;
                     emd_with_context("assignment", index, cluster, point, centroid, ground, dim)
                         .map(|distance| (cluster as u16, distance))
-                }));
+                });
+                let result = match assignment_selection {
+                    EmdAssignmentSelection::Streaming => first_minimum_emd(candidates),
+                    #[cfg(test)]
+                    EmdAssignmentSelection::VecReference => candidates
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(first_minimum_emd_reference),
+                };
                 let completed = processed.fetch_add(1, Ordering::Relaxed) + 1;
                 if (completed == n || completed % 4096 == 0) && result.is_ok() {
                     if let Some(callback) = &assignment_progress {
@@ -1390,6 +1440,33 @@ pub fn kmeans_emd_profiled(
                 .map(|profile| profile.1),
         }),
     })
+}
+
+#[cfg(test)]
+fn kmeans_emd_with_reference_assignment(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    ground: &[f32],
+    k: usize,
+    seed: u64,
+    max_iterations: usize,
+    diagnose_final_assignment: bool,
+) -> Result<Clustering, EmdContextError> {
+    Ok(kmeans_emd_profiled_with_assignment(
+        points,
+        dim,
+        weight,
+        ground,
+        k,
+        seed,
+        max_iterations,
+        None,
+        diagnose_final_assignment,
+        false,
+        EmdAssignmentSelection::VecReference,
+    )?
+    .clustering)
 }
 
 /// EMD-кластеризация для river ground вида `|equity_i - equity_j|`.
@@ -1646,13 +1723,6 @@ pub fn centroid_emd_matrix_profiled(
 mod tests {
     use super::*;
 
-    fn reference_first_minimum(candidates: Vec<(u16, f32)>) -> (u16, f32) {
-        candidates
-            .into_iter()
-            .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
-            .expect("reference candidates must not be empty")
-    }
-
     fn cards(text: &str) -> Vec<u8> {
         text.split_whitespace().map(parse_card).collect()
     }
@@ -1662,12 +1732,13 @@ mod tests {
         let cases = [
             vec![(0, 1.25)],
             vec![(0, 0.0), (1, 0.0), (2, 0.5)],
+            vec![(0, 3.0), (1, 1.0), (2, 2.0), (3, 1.0)],
             vec![(0, -0.0), (1, 0.0), (2, -0.0)],
             vec![(0, 0.0), (1, -0.0), (2, 0.0)],
         ];
 
         for candidates in cases {
-            let expected = reference_first_minimum(candidates.clone());
+            let expected = first_minimum_emd_reference(candidates.clone());
             let actual = first_minimum_emd(candidates.into_iter().map(Ok))
                 .expect("all candidates are valid");
 
@@ -1695,7 +1766,10 @@ mod tests {
                 .map(|distance| (cluster as u16, distance))
             })
             .collect();
-        let actual = first_minimum_emd((0..3).map(|cluster| {
+        let evaluated = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&evaluated);
+        let actual = first_minimum_emd((0..3).map(move |cluster| {
+            observed.fetch_add(1, Ordering::Relaxed);
             emd_with_context(
                 "assignment",
                 7,
@@ -1713,6 +1787,7 @@ mod tests {
         assert_eq!(actual.phase, reference.phase);
         assert_eq!(actual.point_index, reference.point_index);
         assert_eq!(actual.centroid_index, reference.centroid_index);
+        assert_eq!(evaluated.load(Ordering::Relaxed), 2);
         assert!(matches!(
             actual.source,
             EmdError::NegativeMass {
@@ -2209,6 +2284,76 @@ mod tests {
             assert_eq!(iteration.objective_after_update_emd_calls, 4);
         }
         assert_eq!(profile.final_assignment_diagnostic_emd_calls, Some(8));
+    }
+
+    #[test]
+    fn streaming_assignment_matches_vec_reference_clustering_bit_for_bit() {
+        let points = vec![1.0, 0.0, 0.8, 0.2, 0.0, 1.0, 0.1, 0.9];
+        let weight = vec![2, 1, 3, 4];
+        let ground = vec![0.0, 1.0, 1.0, 0.0];
+        let reference =
+            kmeans_emd_with_reference_assignment(&points, 2, &weight, &ground, 2, 7, 5, true)
+                .expect("valid Vec-based reference clustering");
+        let streaming =
+            kmeans_emd_with_diagnostics(&points, 2, &weight, &ground, 2, 7, 5, None, true)
+                .expect("valid streaming clustering");
+
+        assert_eq!(streaming.assignment, reference.assignment);
+        assert_eq!(
+            streaming
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            reference
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            streaming
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            reference
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(streaming.diagnostics.len(), reference.diagnostics.len());
+        for (actual, expected) in streaming.diagnostics.iter().zip(&reference.diagnostics) {
+            assert_eq!(
+                actual.objective_before_update.to_bits(),
+                expected.objective_before_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_update.to_bits(),
+                expected.objective_after_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_reassignment.map(f64::to_bits),
+                expected.objective_after_reassignment.map(f64::to_bits)
+            );
+            assert_eq!(
+                actual.moved_weight_fraction.to_bits(),
+                expected.moved_weight_fraction.to_bits()
+            );
+            assert_eq!(actual.occupied_buckets, expected.occupied_buckets);
+        }
+        let actual = streaming
+            .final_assignment_diagnostic
+            .expect("requested streaming diagnostic");
+        let expected = reference
+            .final_assignment_diagnostic
+            .expect("requested reference diagnostic");
+        assert_eq!(
+            actual.changed_weight_fraction.to_bits(),
+            expected.changed_weight_fraction.to_bits()
+        );
+        assert_eq!(actual.objective.to_bits(), expected.objective.to_bits());
     }
 
     #[test]
