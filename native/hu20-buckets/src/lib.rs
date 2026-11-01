@@ -867,6 +867,16 @@ pub struct Clustering {
     pub centroids: Vec<f32>,
     pub objective: Vec<f64>,
     pub diagnostics: Vec<ClusteringIteration>,
+    /// Проверка согласованности возвращённых назначений с финальными центрами.
+    /// Заполняется только по явному запросу, потому что требует ещё одного
+    /// полного прохода assignment.
+    pub final_assignment_diagnostic: Option<FinalAssignmentDiagnostic>,
+}
+
+/// Результат проверки финальных назначений без изменения сохраняемых таблиц.
+pub struct FinalAssignmentDiagnostic {
+    pub changed_weight_fraction: f64,
+    pub objective: f64,
 }
 
 /// Состояние одной итерации EMD-кластеризации.
@@ -1020,6 +1030,7 @@ pub fn kmeans(
         centroids,
         objective,
         diagnostics: Vec::new(),
+        final_assignment_diagnostic: None,
     }
 }
 
@@ -1046,6 +1057,32 @@ pub fn kmeans_emd_with_progress(
     seed: u64,
     max_iterations: usize,
     progress: Option<EmdProgressCallback>,
+) -> Result<Clustering, EmdContextError> {
+    kmeans_emd_with_diagnostics(
+        points,
+        dim,
+        weight,
+        ground,
+        k,
+        seed,
+        max_iterations,
+        progress,
+        false,
+    )
+}
+
+/// Взвешенный k-means с необязательной проверкой финальных назначений.
+/// Проверка не меняет ни assignment, ни центроиды, возвращаемые кластеризацией.
+pub fn kmeans_emd_with_diagnostics(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    ground: &[f32],
+    k: usize,
+    seed: u64,
+    max_iterations: usize,
+    progress: Option<EmdProgressCallback>,
+    diagnose_final_assignment: bool,
 ) -> Result<Clustering, EmdContextError> {
     let n = weight.len();
     assert!(
@@ -1177,11 +1214,61 @@ pub fn kmeans_emd_with_progress(
             break;
         }
     }
+    let final_assignment_diagnostic = if diagnose_final_assignment {
+        let reassigned: Vec<(u16, f32)> = (0..n)
+            .into_par_iter()
+            .map(|index| {
+                let point = row(index);
+                let distances: Result<Vec<(u16, f32)>, EmdContextError> = (0..k)
+                    .map(|cluster| {
+                        let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
+                        emd_with_context(
+                            "final-assignment-diagnostic",
+                            index,
+                            cluster,
+                            point,
+                            centroid,
+                            ground,
+                            dim,
+                        )
+                        .map(|distance| (cluster as u16, distance))
+                    })
+                    .collect();
+                distances.map(|distances| {
+                    distances
+                        .into_iter()
+                        .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
+                        .unwrap()
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let changed_weight_fraction = reassigned
+            .iter()
+            .zip(&assignment)
+            .zip(weight)
+            .filter(|((next, current), _)| next.0 != **current)
+            .map(|(_, &value)| value as f64)
+            .sum::<f64>()
+            / total;
+        let objective = reassigned
+            .iter()
+            .zip(weight)
+            .map(|(entry, &value)| entry.1 as f64 * value as f64)
+            .sum::<f64>()
+            / total;
+        Some(FinalAssignmentDiagnostic {
+            changed_weight_fraction,
+            objective,
+        })
+    } else {
+        None
+    };
     Ok(Clustering {
         assignment,
         centroids,
         objective,
         diagnostics,
+        final_assignment_diagnostic,
     })
 }
 
@@ -1195,6 +1282,27 @@ pub fn kmeans_wasserstein_1d(
     k: usize,
     seed: u64,
     max_iterations: usize,
+) -> Clustering {
+    kmeans_wasserstein_1d_with_diagnostics(
+        points,
+        weight,
+        coordinates,
+        k,
+        seed,
+        max_iterations,
+        false,
+    )
+}
+
+/// Одномерная EMD-кластеризация с необязательной проверкой финальных назначений.
+pub fn kmeans_wasserstein_1d_with_diagnostics(
+    points: &[f32],
+    weight: &[u64],
+    coordinates: &[f32],
+    k: usize,
+    seed: u64,
+    max_iterations: usize,
+    diagnose_final_assignment: bool,
 ) -> Clustering {
     let dimension = coordinates.len();
     let n = weight.len();
@@ -1309,11 +1417,53 @@ pub fn kmeans_wasserstein_1d(
                 centroids[cluster * dimension + sorted_index];
         }
     }
+    let final_assignment_diagnostic = if diagnose_final_assignment {
+        let reassigned: Vec<(u16, f32)> = (0..n)
+            .into_par_iter()
+            .map(|index| {
+                let point = row(index);
+                (0..k)
+                    .map(|cluster| {
+                        (
+                            cluster as u16,
+                            wasserstein_1d_sorted(
+                                point,
+                                &centroids[cluster * dimension..(cluster + 1) * dimension],
+                                &sorted_coordinates,
+                            ),
+                        )
+                    })
+                    .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
+                    .unwrap()
+            })
+            .collect();
+        let changed_weight_fraction = reassigned
+            .iter()
+            .zip(&assignment)
+            .zip(weight)
+            .filter(|((next, current), _)| next.0 != **current)
+            .map(|(_, &value)| value as f64)
+            .sum::<f64>()
+            / total;
+        let objective = reassigned
+            .iter()
+            .zip(weight)
+            .map(|(entry, &value)| entry.1 as f64 * value as f64)
+            .sum::<f64>()
+            / total;
+        Some(FinalAssignmentDiagnostic {
+            changed_weight_fraction,
+            objective,
+        })
+    } else {
+        None
+    };
     Clustering {
         assignment,
         centroids: original_centroids,
         objective,
         diagnostics,
+        final_assignment_diagnostic,
     }
 }
 
@@ -1793,6 +1943,28 @@ mod tests {
             Some(result.diagnostics[1].objective_before_update)
         );
         assert_eq!(result.diagnostics[1].objective_after_reassignment, None);
+    }
+
+    #[test]
+    fn kmeans_emd_reports_final_assignment_consistency_when_requested() {
+        let result = kmeans_emd_with_diagnostics(
+            &[1.0, 0.0, 0.8, 0.2, 0.0, 1.0, 0.1, 0.9],
+            2,
+            &[2, 1, 3, 4],
+            &[0.0, 1.0, 1.0, 0.0],
+            2,
+            7,
+            1,
+            None,
+            true,
+        )
+        .expect("valid EMD clustering");
+
+        let diagnostic = result
+            .final_assignment_diagnostic
+            .expect("requested diagnostic must be present");
+        assert!(diagnostic.objective.is_finite());
+        assert!((0.0..=1.0).contains(&diagnostic.changed_weight_fraction));
     }
 
     #[test]

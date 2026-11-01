@@ -1,4 +1,4 @@
-//! hu20-buckets build --out DIR [--ranks 13] [--ks 50,200] [--bins 50] [--seed 1] [--iterations 100]
+//! hu20-buckets build --out DIR [--ranks 13] [--ks 50,200] [--bins 50] [--seed 1] [--iterations 100] [--diagnose-final-assignments]
 //! hu20-buckets key HOLE BOARD     e.g. key "Ah Kh" "2h 7c 9d"
 use hu20_buckets::*;
 use std::fs;
@@ -112,6 +112,9 @@ fn build(args: &[String]) {
         .map(|k| k.parse().unwrap())
         .collect();
     let abstraction = arg(args, "--abstraction", "equity");
+    let diagnose_final_assignments = args
+        .iter()
+        .any(|argument| argument == "--diagnose-final-assignments");
     assert!(
         matches!(abstraction.as_str(), "equity" | "potential"),
         "--abstraction must be equity or potential"
@@ -161,16 +164,20 @@ fn build(args: &[String]) {
                 &format!("end k={k}, classes={}", turn.keys.len()),
             );
             log.stage("turn-clustering", &format!("start k={k}"));
-            let turn_clusters = kmeans_wasserstein_1d(
+            let turn_clusters = kmeans_wasserstein_1d_with_diagnostics(
                 &turn.distribution,
                 &turn.weight,
                 &river_clusters.centroids,
                 k,
                 seed,
                 iterations,
+                diagnose_final_assignments,
             );
             for (iteration, diagnostic) in turn_clusters.diagnostics.iter().enumerate() {
                 log.stage("turn-clustering", &format!("k={k}, iteration={}, objective_before={:.9}, objective_after={:.9}, moved_weight_fraction={:.9}, occupied_buckets={}", iteration + 1, diagnostic.objective_before_update, diagnostic.objective_after_update, diagnostic.moved_weight_fraction, diagnostic.occupied_buckets));
+            }
+            if let Some(diagnostic) = &turn_clusters.final_assignment_diagnostic {
+                log.stage("turn-clustering", &format!("k={k}, final_assignment_diagnostic=true, changed_weight_fraction={:.9}, objective={:.9}", diagnostic.changed_weight_fraction, diagnostic.objective));
             }
             log.stage("turn-clustering", &format!("end k={k}"));
             log.stage("write-turn-table", &format!("start k={k}"));
@@ -214,7 +221,7 @@ fn build(args: &[String]) {
                     eprintln!("[{:9.1}s] flop-clustering k={k}, iteration={iteration}, phase=objective-after-update, objective_before={objective_before_update:.9}, objective_after={objective_after_update:.9}", flop_started.elapsed().as_secs_f64());
                 }
             });
-            let flop_clusters = kmeans_emd_with_progress(
+            let flop_clusters = kmeans_emd_with_diagnostics(
                 &flop.distribution,
                 k,
                 &flop.weight,
@@ -223,10 +230,14 @@ fn build(args: &[String]) {
                 seed,
                 iterations,
                 Some(flop_progress),
+                diagnose_final_assignments,
             )
             .unwrap_or_else(|error| abort_emd(&out, "flop-clustering", error));
             for (iteration, diagnostic) in flop_clusters.diagnostics.iter().enumerate() {
                 log.stage("flop-clustering", &format!("k={k}, iteration={}, objective_before={:.9}, objective_after={:.9}, moved_weight_fraction={:.9}, occupied_buckets={}", iteration + 1, diagnostic.objective_before_update, diagnostic.objective_after_update, diagnostic.moved_weight_fraction, diagnostic.occupied_buckets));
+            }
+            if let Some(diagnostic) = &flop_clusters.final_assignment_diagnostic {
+                log.stage("flop-clustering", &format!("k={k}, final_assignment_diagnostic=true, changed_weight_fraction={:.9}, objective={:.9}", diagnostic.changed_weight_fraction, diagnostic.objective));
             }
             log.stage("flop-clustering", &format!("end k={k}"));
             log.stage("write-flop-table", &format!("start k={k}"));

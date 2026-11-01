@@ -6,7 +6,8 @@ param(
     [ValidateRange(1, 100000)] [int] $Iterations = 10,
     [ValidateRange(1, 64)] [int] $Threads = 2,
     [ValidateRange(1, 86400)] [int] $TimeoutSeconds = 3600,
-    [UInt64] $Seed = 202610050003
+    [UInt64] $Seed = 202610050003,
+    [switch] $DiagnoseFinalAssignments
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,10 +30,16 @@ try {
         throw 'Refusing to measure a dirty working tree. Commit or stash changes first.'
     }
     cargo build --release
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release build failed with code $LASTEXITCODE."
+    }
     $binary = Join-Path $project 'target\release\hu20-buckets.exe'
     if (-not (Test-Path -LiteralPath $binary)) { throw "Release binary was not found: $binary" }
 
     $arguments = @('build', '--out', $output, '--ranks', $Ranks, '--ks', $K, '--iterations', $Iterations, '--seed', $Seed, '--abstraction', 'potential')
+    if ($DiagnoseFinalAssignments) {
+        $arguments += '--diagnose-final-assignments'
+    }
     $quotedArguments = ($arguments | ForEach-Object {
         if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
     }) -join ' '
@@ -55,18 +62,14 @@ try {
         }
         Receive-Job -Job $memoryJob -Wait -AutoRemoveJob | Out-Null
         $process.Refresh()
-        $exitCode = $process.ExitCode
+        $exitCode = $null
+        try {
+            $exitCode = $process.ExitCode
+        } catch {
+            throw "Generator process exited but its exit code is unavailable. See $output\stderr.log"
+        }
         if ($null -eq $exitCode) {
-            $summaryPath = Join-Path $output 'summary.json'
-            $statusPath = Join-Path $output 'status.json'
-            $completed = (Test-Path -LiteralPath $summaryPath -PathType Leaf) -and
-                (Test-Path -LiteralPath $statusPath -PathType Leaf) -and
-                ((Get-Content -Raw -LiteralPath $statusPath | ConvertFrom-Json).stage -eq 'complete')
-            if ($completed) {
-                $exitCode = 0
-            } else {
-                throw "Generator process exited but its exit code is unavailable. See $output\stderr.log"
-            }
+            throw "Generator process exited but its exit code is unavailable. See $output\stderr.log"
         }
         "process_id=$($process.Id)`nexit_code=$exitCode" | Add-Content -LiteralPath (Join-Path $output 'launcher-context.txt') -Encoding utf8
         if ($exitCode -ne 0) { throw "Generator exited with code $exitCode. See $output\stderr.log" }
