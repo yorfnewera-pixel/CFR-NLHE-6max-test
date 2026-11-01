@@ -661,6 +661,23 @@ fn emd_with_context(
     })
 }
 
+/// Выбирает первый минимум, не материализуя временный список расстояний.
+fn first_minimum_emd<I>(mut candidates: I) -> Result<(u16, f32), EmdContextError>
+where
+    I: Iterator<Item = Result<(u16, f32), EmdContextError>>,
+{
+    let mut best = candidates
+        .next()
+        .expect("EMD assignment requires at least one centroid")?;
+    for candidate in candidates {
+        let candidate = candidate?;
+        if candidate.1 < best.1 {
+            best = candidate;
+        }
+    }
+    Ok(best)
+}
+
 fn add_flow_edge(graph: &mut [Vec<FlowEdge>], from: usize, to: usize, capacity: f64, cost: f64) {
     let forward = FlowEdge {
         to,
@@ -1164,20 +1181,12 @@ pub fn kmeans_emd_profiled(
             .map(|index| {
                 let point = row(index);
                 let mut emd_calls = 0usize;
-                let distances: Result<Vec<(u16, f32)>, EmdContextError> = (0..k)
-                    .map(|cluster| {
-                        let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
-                        emd_calls += 1;
-                        emd_with_context("assignment", index, cluster, point, centroid, ground, dim)
-                            .map(|distance| (cluster as u16, distance))
-                    })
-                    .collect();
-                let result = distances.map(|distances| {
-                    distances
-                        .into_iter()
-                        .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
-                        .unwrap()
-                });
+                let result = first_minimum_emd((0..k).map(|cluster| {
+                    let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
+                    emd_calls += 1;
+                    emd_with_context("assignment", index, cluster, point, centroid, ground, dim)
+                        .map(|distance| (cluster as u16, distance))
+                }));
                 let completed = processed.fetch_add(1, Ordering::Relaxed) + 1;
                 if (completed == n || completed % 4096 == 0) && result.is_ok() {
                     if let Some(callback) = &assignment_progress {
@@ -1637,8 +1646,80 @@ pub fn centroid_emd_matrix_profiled(
 mod tests {
     use super::*;
 
+    fn reference_first_minimum(candidates: Vec<(u16, f32)>) -> (u16, f32) {
+        candidates
+            .into_iter()
+            .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
+            .expect("reference candidates must not be empty")
+    }
+
     fn cards(text: &str) -> Vec<u8> {
         text.split_whitespace().map(parse_card).collect()
+    }
+
+    #[test]
+    fn streaming_emd_minimum_matches_reference_for_k1_ties_and_signed_zeroes() {
+        let cases = [
+            vec![(0, 1.25)],
+            vec![(0, 0.0), (1, 0.0), (2, 0.5)],
+            vec![(0, -0.0), (1, 0.0), (2, -0.0)],
+            vec![(0, 0.0), (1, -0.0), (2, 0.0)],
+        ];
+
+        for candidates in cases {
+            let expected = reference_first_minimum(candidates.clone());
+            let actual = first_minimum_emd(candidates.into_iter().map(Ok))
+                .expect("all candidates are valid");
+
+            assert_eq!(actual.0, expected.0);
+            assert_eq!(actual.1.to_bits(), expected.1.to_bits());
+        }
+    }
+
+    #[test]
+    fn streaming_emd_minimum_returns_the_same_first_error_as_reference_assignment() {
+        let point = [1.0, 0.0];
+        let centroids = [1.0, 0.0, -1.0, 2.0, 0.0, 1.0];
+        let ground = [0.0, 1.0, 1.0, 0.0];
+        let reference: Result<Vec<(u16, f32)>, EmdContextError> = (0..3)
+            .map(|cluster| {
+                emd_with_context(
+                    "assignment",
+                    7,
+                    cluster,
+                    &point,
+                    &centroids[cluster * 2..(cluster + 1) * 2],
+                    &ground,
+                    2,
+                )
+                .map(|distance| (cluster as u16, distance))
+            })
+            .collect();
+        let actual = first_minimum_emd((0..3).map(|cluster| {
+            emd_with_context(
+                "assignment",
+                7,
+                cluster,
+                &point,
+                &centroids[cluster * 2..(cluster + 1) * 2],
+                &ground,
+                2,
+            )
+            .map(|distance| (cluster as u16, distance))
+        }));
+
+        let reference = reference.expect_err("second centroid must fail");
+        let actual = actual.expect_err("second centroid must fail");
+        assert_eq!(actual.phase, reference.phase);
+        assert_eq!(actual.point_index, reference.point_index);
+        assert_eq!(actual.centroid_index, reference.centroid_index);
+        assert!(matches!(
+            actual.source,
+            EmdError::NegativeMass {
+                side: "right",
+                index: 0
+            }
+        ));
     }
 
     fn brute_force_transport_cost(
@@ -2184,6 +2265,15 @@ mod tests {
             .unwrap()
             .iter()
             .any(|event| matches!(event, EmdProgressEvent::IterationStart { iteration: 1 })));
+        assert!(events.lock().unwrap().iter().any(|event| matches!(
+            event,
+            EmdProgressEvent::AssignmentProgress {
+                iteration: 1,
+                processed: 2,
+                total: 2,
+                emd_calls: 4,
+            }
+        )));
         assert!(events
             .lock()
             .unwrap()
