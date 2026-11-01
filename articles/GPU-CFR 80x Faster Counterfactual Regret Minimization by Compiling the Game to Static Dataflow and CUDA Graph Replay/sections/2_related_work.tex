@@ -1,0 +1,72 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{The CFR family and exact equilibrium solving.}
+CFR \cite{zinkevich2007regret} minimizes counterfactual regret independently at every
+information set. In two-player zero-sum games the average strategy profile converges
+to a Nash equilibrium \cite{nash1950equilibrium}. CFR$^{+}$
+\cite{tammelin2014solving} replaces regret matching \cite{hart2000simple} with regret matching$^{+}$
+and linear averaging, and was the engine behind the essential solution of heads-up
+limit hold'em \cite{tammelin2015solving,bowling2015heads}.
+Subsequent variants tune the update rule: discounting \cite{brown2019solving},
+dynamic discounting \cite{xu2024dynamic}, predictive/optimistic updates connecting
+CFR to Blackwell approachability
+\cite{farina2021faster,farina2019optimistic,farina2019stable,xu2024minimizing}, and
+refinements of regret matching itself \cite{farina2023regret,meng2026a}.
+First-order methods reach equilibria by a different route, smoothing
+\cite{hoda2010smoothing,nesterov2005excessive} on the sequence form
+\cite{koller1997representations}. Burch et al.\ \cite{burch2019revisiting} analyze
+whether the two players are updated \emph{simultaneously} or \emph{alternately},
+which changes iterate quality at matched iteration counts. Our work targets the
+execution layer shared by the tabular CFR family. The compiled slot representation
+supports vanilla CFR, CFR$^{+}$, DCFR \cite{brown2019solving}, and predictive
+CFR$^{+}$ \cite{farina2021faster} under both update orders.
+
+\paragraph{Scaling CFR by approximation.}
+When the full tree is too large, the community samples it, shrinks it, prunes it, or
+learns it. Monte Carlo CFR estimates counterfactual values from sampled trajectories
+\cite{lanctot2009monte}, with public-chance and other variance-controlled variants
+for solving and evaluation
+\cite{johanson2012efficient,burch2012efficient,schmid2019variance,li2026correlated,li2026av}.
+Abstraction maps the game onto a smaller proxy
+\cite{gilpin2007lossless,waugh2009abstraction,kroer2018unified,li2024rl,li2025efficient,li2026effective,li2026abstraction},
+a line of work motivated directly by CFR's per-iteration cost
+\cite{johanson2012efficient,brown2015hierarchical}. Regret-based and online pruning
+skip low-value branches during the traversal \cite{brown2015regret,li2025efficient}.
+Deep CFR and its successors replace tabular regrets with neural approximation
+\cite{brown2019deep,DBLP:journals/corr/abs-1901-07621}, and search-based and
+language-model agents combine learned models with online play
+\cite{brown2020combining,schmid2023student,li2026pokerskill,wang2026solver}. These methods reduce the game or the
+work sampled from it. Our compiler addresses the regime in which the full tree is
+available and repeatedly executed. Every one of these methods still runs a tabular CFR
+sweep on whatever tree remains, so a faster sweep composes with all of them.
+
+\paragraph{Systems and frameworks for game solving.}
+OpenSpiel \cite{lanctot2019openspiel} is the field's reference library. Its CFR
+implementations favor readability and breadth of game support. LiteEFG
+\cite{liu2024liteefg} compiles extensive-form games into a graph representation
+executed by a single-threaded C++ backend. We use it as the primary compiled CPU
+baseline. PokerRL \cite{steinberger2019pokerrl} vectorizes CFR over hand ranges
+\cite{johanson2012efficient,moravvcik2017deepstack}, a HUNL-specific representation.
+Its released Libratus endgames are our external poker reference in
+\cref{app:libratus}. Accelerated best-response computation
+\cite{johanson2011accelerating} speeds up the \emph{evaluation} half of the loop with
+game-specific structure. Our exploitability evaluator is a generic analogue that runs
+on the same compiled arrays as the solver. Parallel CFR has been explored through
+distributed sampling and equilibrium computation
+\cite{jackson2013slumbot,brown2015hierarchical}, on CPU clusters
+\cite{DBLP:conf/ispa/ZhangLZXW21a}, and in real-time solvers that partition the
+traversal across CPU threads under per-decision budgets \cite{li2026real}. The
+milestone poker systems used supercomputer-scale CPU parallelism
+\cite{bowling2015heads,brown2018superhuman}. Those designs parallelize the
+\emph{traversal}. We change the representation the traversal runs on, so the CPU arm
+of our implementation needs no CFR-specific threading of its own (\cref{sec:setup}).
+
+Accelerators already drive game \emph{simulation} at scale \cite{koyamada2023pgx}.
+GPU CFR has recent precedent
+\cite{kim2026parallelizing,DBLP:journals/corr/abs-2508-06559}, and the GPU path of
+the fastest such system still runs slower than an optimized CPU solver. We instead compile
+the game into depth-stratified dense tensors and replay the whole iteration as one
+captured CUDA graph. This compilation step is what makes stock PyTorch
+\cite{paszke2019pytorch} and NVIDIA CUDA graphs \cite{guide2020cuda} applicable to
+CFR at all.

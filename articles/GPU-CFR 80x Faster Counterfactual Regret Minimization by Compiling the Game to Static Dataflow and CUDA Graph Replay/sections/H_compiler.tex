@@ -1,0 +1,129 @@
+\section{Compiler Passes and Memory Plan}
+\label{app:compiler}
+
+\Cref{sec:method} presents the compiled representation by what it contains;
+this appendix presents it by how it is produced. \Cref{alg:compile} lists the
+logical passes and \cref{fig:compiler} draws them on the example game of
+\cref{fig:archpipeline}; these are data dependencies.
+Node and edge walks plus the stable depth sort cost
+$O(\numnodes + \numedges \log \numedges)$ time and $O(\numnodes + \numedges)$
+host storage; device allocations may precede planning. \Cref{tab:overhead} and
+\cref{tab:lifecycle} report the measured build times; on the 434k-state turn
+subgame the game specification dominates and compilation proper is a fraction
+of a second.
+
+\begin{algorithm}[t]
+\caption{\textsc{Compile}(GameSpec $G$, rule $\rho$, device $d$) $\to$ solver}
+\label{alg:compile}
+\begin{algorithmic}[1]
+\State \textbf{Validate} $G$: node ids contiguous, one parent per non-root node
+(tree), every information set owned by one player and its action list equal to
+each member node's, chance probabilities present for every chance edge.
+\Comment{structural checks}
+\State \textbf{Slots}: sort information sets by key; $\mathrm{off}(I) \gets$
+prefix sum of $|\acts(I)|$; $\numslots \gets \sum_I |\acts(I)|$.
+\State \textbf{Node arrays}: number nodes parent-before-child; emit type, owner,
+information set, action offset/count, terminal payoff $u$, chance probability
+$p_c$ of each chance action.
+\State \textbf{Edge arrays}: for each edge $(h,a,h')$ emit parent $h$, child
+$h'$, slot $\mathrm{off}(I(h)) + a$ or the sentinel for chance edges, owner
+flags, sign $s(e)$, multiplier $p_c$ or $1$. \Comment{\cref{sec:compiled}}
+\State \textbf{Depth schedule}: $\mathrm{depth}(h)$ by one forward walk; stable
+sort edges by $\mathrm{depth}(\text{parent})$; block $b$ = all edges of one
+depth; assert parent depth $<$ child depth for every edge.
+\Comment{$D$ blocks, \cref{sec:dataflow}(b)}
+\State \textbf{Chance folding}: walk the blocks once, $\pi_c(h') \gets
+\pi_c(h)\, p_c(h,a,h')$; template $\cfv_{\mathrm{tmpl}}(z) \gets \pi_c(z)\,u(z)$;
+retain the root action owning each node and $\pi_c$ with the root factor
+removed, for later range updates. \Comment{\cref{eq:template}}
+\State \textbf{Index emission}: per block, dual-lane $P_2, C_2, S_2$ (chance and
+other-player entries point at the sentinel) and single-lane $P_{\mathrm{val}},
+C_{\mathrm{val}}, S_{\mathrm{val}}$; flat over decision edges $P_{\mathrm{reg}},
+C_{\mathrm{reg}}, S_{\mathrm{reg}}, O_{\mathrm{reg}}, M_{\mathrm{reg}}, s$; per
+player, the halves of the flat arrays for alternating updates.
+\State \textbf{Memory plan}: estimate scheduled storage from
+$\numnodes, \numslots, \numinfosets$ and dtype; record budget fit as a
+planning indicator, provision iteration buffers, set root reach to one.
+\State \textbf{Rule lowering}: bind $\rho$'s hooks into the iteration body:
+\textsc{discount}$(\regret,\bar{s},t)$ before the passes,
+\textsc{after}$(\regret)$ after them, and a prediction buffer when $\rho$
+matches against $\regret + r_t$. \Comment{\cref{tab:rules}}
+\State \textbf{Runtime}: on CUDA, three eager warmup iterations, capture of one
+(or $k$) iteration bodies, record of the persistent buffer addresses; replay
+thereafter with the device-side counter refilled per call.
+\Comment{\cref{sec:cudagraph}}
+\end{algorithmic}
+\end{algorithm}
+
+\input{sections/fig_compiler_passes}
+
+\paragraph{Planning scope.}
+The memory plan is an estimate: it sizes the scheduled buffers from the
+game's counts and reports whether they fit the configured budget, and the
+solver reads that verdict as a planning indicator and builds regardless. The regret and average-strategy vectors are allocated before the
+schedule is planned, so the passes above describe the logical order of the
+build.
+
+\paragraph{Input representation.}
+The input is a tabular game specification: a map from node id to (type, acting
+player, information-set key, action list with child ids, terminal payoff), a map
+from information-set key to (player, action names), and a map from node id to the
+chance probability of reaching it from its parent. Native games and the
+OpenSpiel and file-based converters all produce this one structure, so every
+pass below it is shared; a converter is validated by the structural and
+behavioral checks of \cref{app:protocol}.
+
+\paragraph{Mutable and immutable fields.}
+\Cref{tab:memplan} separates what the graph pins from what a caller may change.
+Every index array is immutable after emission. Two inputs are mutable in place
+without recompilation: the terminal payoffs and the root chance distribution,
+both of which enter the iteration only through the values template
+(\cref{eq:template}), which \texttt{set\_payoffs} and \texttt{set\_root\_chance}
+rewrite in place from the retained per-node root owner and below-root chance
+product. The solver state is reset in place by \texttt{reset()}, which zeroes
+the two accumulators and the prediction buffer and resets the iteration counter;
+because no buffer is reallocated, the captured graph stays valid and the next
+call replays from iteration one. \Cref{tab:lifecycle} reports the cost of each
+of these operations.
+
+\begin{table*}[!htb]
+\centering
+\caption{Memory plan of the compiled solver. Sizes are element counts; the
+dtype is the configured compute dtype except where noted. \emph{Pinned} marks
+buffers whose addresses the captured graph records; \emph{Mutable} marks the
+inputs a caller may rewrite in place between solves.}
+\label{tab:memplan}
+{
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llccl}
+\toprule
+Buffer & Size & Pinned & Mutable & Written \\
+\midrule
+node arrays (type, owner, set, offsets) & $\numnodes$, int & -- & -- & build \\
+edge index arrays (all of step 7) & $\approx 7\numedges + 2\numedges$, int64 & -- & -- & build \\
+chance reach $\pi_c$ & $\numnodes$ & -- & via root & build \\
+values template $\cfv_{\mathrm{tmpl}}$ & $\numnodes$ & yes & yes & build, updates \\
+regrets $\regret$ & $\numslots$ & yes & reset & every iteration \\
+strategy sum $\bar{s}$ (float64) & $\numslots$ & yes & reset & every iteration \\
+prediction buffer (PCFR$^{+}$) & $\numslots$ & yes & reset & every iteration \\
+strategy $\strat_{\mathrm{ext}}$ (+ sentinel) & $\numslots + 1$ & yes & -- & every iteration \\
+dual-lane reach & $2\numnodes$ & yes & -- & every iteration \\
+values $\cfv$ & $\numnodes$ & yes & -- & every iteration \\
+set totals & $\numinfosets$ & yes & -- & every iteration \\
+iteration counter $t$ (device) & 1, float32 & yes & reset & every replay \\
+CUDA-graph pool & driver-managed & -- & -- & capture \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+\paragraph{Update rules share one schedule.}
+\Cref{tab:rules} counts the Aten operations each shipped rule issues per
+iteration. The rules differ only in the hooks of step 9 (the dot matrix of
+\cref{fig:compiler}), which act on the slot vectors: the delta against CFR$^{+}$ is a constant per rule (from $-1$ for vanilla
+CFR, which drops the clamp, to $+29$ for DCFR's discount schedule) and
+does not change between Leduc and the 434k-state turn subgame, while the
+tree-dependent part of the schedule, the $8D$ operations of the two passes, is
+shared verbatim. Every rule's body captures into a CUDA graph, because the hooks
+read the iteration index from the device-side counter. The convergence of the rules is reported in \cref{app:extra}.
+
+\input{figures/TABLE_T16_rules.tex}

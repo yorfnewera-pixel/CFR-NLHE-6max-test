@@ -1,0 +1,240 @@
+\section{Compiling CFR onto Accelerators}
+\label{sec:method}
+
+The design follows one observation: once the game is fixed, the entire structure of
+a CFR iteration is known at build time, and only the numbers change. We therefore split the solver into a one-time \emph{compilation} of the game into
+flat arrays (\cref{sec:compiled}) and a per-iteration \emph{dataflow} over those
+arrays whose operation sequence never changes (\cref{sec:dataflow}). The fixed
+sequence makes the iteration a legal target for CUDA-graph capture
+(\cref{sec:cudagraph}). \Cref{fig:archpipeline} shows the pipeline on an 11-node
+example game with a chance root, two decisions per player, and six terminals, and
+\cref{fig:archdataflow} reuses the same game. A layered verification design checks
+the compiled schedule, graph replay, and evaluator (\cref{sec:correctness}).
+
+\input{sections/fig_arch_pipeline}
+\input{sections/fig_arch_dataflow}
+\subsection{Compiled game representation}
+\label{sec:compiled}
+
+Compilation walks the game once, numbering nodes in breadth-first order so that
+every parent precedes its children, and emits:
+\begin{itemize}
+    \item \textbf{Node arrays} of length $\numnodes$: owner (player 1/2, chance,
+    terminal), depth, and a terminal payoff vector.
+    \item \textbf{Edge arrays} of length $\numedges$: for every edge, its parent node,
+    child node, and \emph{slot}, the index of the corresponding (information set,
+    action) pair in a flat slot space of size $\numslots = \sum_{I} |\acts(I)|$.
+    Chance edges carry their fixed probability and no slot.
+    \item \textbf{Information-set arrays} of length $\numinfosets$ and $\numslots$:
+    per-set action counts and slot offsets, so regret matching operates on flat
+    vectors with segment reductions and never touches a ragged structure.
+\end{itemize}
+All solver state (accumulated regrets $\regret \in \R^{\numslots}$, strategy sums
+$\bar{s} \in \R^{\numslots}$, and the iteration scratch below) lives in
+preallocated device tensors. On solver construction, root reach entries are set to
+one and every buffer is written before it is read. The scratch footprint is
+$(5\numnodes + \numslots + \numinfosets + 1)$ floats plus the integer index arrays.
+Measured peak GPU memory on the largest game is 183\,MiB allocated and 236\,MiB
+reserved, including the CUDA-graph pool and evaluation scratch (\cref{tab:memory}).
+That is about 570 bytes per tree node. Float scratch, persistent slot vectors, and
+the int64 edge-index arrays all scale linearly in $\numnodes$, $\numedges$, and
+$\numslots$, with $\numedges \approx \numnodes$ in trees. The same code path runs
+unchanged on CPU and GPU.
+
+\subsection{One iteration as a fixed dataflow}
+\label{sec:dataflow}
+
+A CFR iteration is regret matching, a forward reach pass, a backward value pass with
+instantaneous-regret accumulation, and the update rule
+(\crefrange{eq:reach}{eq:rm}). \Cref{fig:archdataflow} shows the four phases as they
+execute. Three structural observations turn the two tree passes into a handful of
+batched tensor operations each. Throughout, ``overwrite'' semantics are available
+because the game is a tree. Every non-root node has exactly one incoming edge, so a
+scatter along edges writes each destination exactly once per iteration, and buffers
+never need zeroing within a solve.
+
+\paragraph{(a) Static chance folding.}
+Chance behavior is strategy-independent, so for every node $h$ the product of chance
+probabilities on the root-to-$h$ path, $\pi_c(h)$, is a build-time constant. We fold
+it into a \emph{values template}
+\begin{equation}
+    \cfv_{\mathrm{tmpl}}(h) \;=\;
+    \begin{cases}
+        \pi_c(h)\, u(h) & h \in \termnodes,\\
+        0 & \text{otherwise},
+    \end{cases}
+    \label{eq:template}
+\end{equation}
+from which the backward pass starts every iteration. The invariant is that chance probabilities appear \emph{only} through
+\cref{eq:template}. During the dynamic passes, every chance edge acts as multiplier
+$1$ (via the sentinel slot below). The backward recurrence
+$\cfv(h) = \sum_{(h,a,h')} \strat_{\mathrm{ext}}(h,a)\, \cfv(h')$
+then returns at each node $h$ the \emph{chance-weighted} continuation value
+$\sum_{z \succeq h} \pi_c(z)\, \reach^{\strat}_{1,2}(h \to z)\, u(z)$. There is
+no double counting, because each terminal's full-path chance product enters exactly
+once, at the template. This removes every chance multiplication from the
+per-iteration forward pass. Chance edges remain in the depth blocks only as sentinel
+reads.
+
+\paragraph{(b) Depth-level execution blocks.}
+The forward pass must respect topology, since a child's reach depends on its
+parent's. In a tree, every child sits exactly one depth level below its parent, so
+grouping edges by \emph{parent depth} yields a valid schedule at the coarsest
+granularity a depth-synchronous schedule allows. All edges at one depth execute as a
+single batched gather, multiply, and scatter, and the number of sequential steps
+equals the tree depth. Across our suite this is 4--15 blocks per pass
+(\cref{tab:suite}). A generic topological schedule over (stage $\times$ depth)
+intersections produced up to 100 blocks on the same trees. The backward pass uses the same blocks
+in reverse with \texttt{index\_add} scatters, which tolerate repeated parents within
+a block.
+
+\paragraph{(c) Sentinel slot and dual-lane reach buffer.}
+Player $i$'s reach lane $\reach_i$ must multiply $i$'s own strategy entries and copy
+through everything else:
+\begin{equation}
+    \reach_i(h') =
+    \begin{cases}
+        \reach_i(h)\, \strat(\mathrm{slot}(h,a)) & (h,a,h') \text{ owned by } i,\\
+        \reach_i(h) & \text{otherwise}.
+    \end{cases}
+    \label{eq:lanes}
+\end{equation}
+We implement \cref{eq:lanes} branchlessly. The strategy vector is extended by one \emph{sentinel} slot pinned to $1.0$. For
+each edge and each lane, a precomputed index points either at the edge's true slot
+(own-player edges) or at the sentinel (all others). The reach buffer holds both lanes contiguously ($2\numnodes$ entries), and
+per-block index arrays over the doubled range advance both lanes with a single
+gather, multiply, and scatter. The same trick removes the last per-edge branch from regret accumulation. For a
+player-$i$ edge $(h, a)$ with slot $q = \mathrm{slot}(h,a)$, the instantaneous
+regret contribution is
+\begin{equation}
+    r(q) \;\mathrel{+}=\; s(e)\,\reach_{-i}(h)\,\big(\cfv(h') - \cfv(h)\big),
+    \label{eq:instregret}
+\end{equation}
+where $e=(h,a,h')$, $s(e)=+1$ for player 1 and $-1$ for player 2,
+$\cfv$ stores player-1 values, and $\reach_{-i}(h)$ is read from the
+opponent's lane through a precomputed index array. Summing \cref{eq:instregret} over an information-set action with a slot-indexed
+\texttt{index\_add} yields $\sum_{h\in I}s(e)\reach_{-i}(h)(\cfv(h')-\cfv(h))$,
+the standard counterfactual regret. Chance reach is already in $\cfv$ through
+\cref{eq:template} and is not multiplied again.
+
+Per-block index arrays $P_2, C_2, S_2$ are the precomputed dual-lane parent/child/slot
+arrays of block $b$, covering every edge (chance and other-player entries point at the
+sentinel). $P_{\mathrm{val}}$, $C_{\mathrm{val}}$, $S_{\mathrm{val}}$ cover every edge of the
+backward value pass; $P_{\mathrm{reg}}$, $C_{\mathrm{reg}}$, $S_{\mathrm{reg}}$,
+$O_{\mathrm{reg}}$
+cover player decision edges only, with $O_{\mathrm{reg}}$ indexing the opponent-reach lane at
+the parent and $M_{\mathrm{reg}}$ the acting player's own lane there, used by the
+averaging update. Because $\cfv$ stores player-1 values, a build-time sign
+$s(e) \in \{\pm 1\}$ orients each decision edge's value difference toward its
+acting player; $s(b)$ gathers these signs for the block's decision edges.
+Chance edges and sentinel slots never receive regret updates.
+$\strat_{\mathrm{ext}}$ denotes the strategy vector with the sentinel entry fixed at $1$.
+
+\begin{algorithm}[t]
+\caption{One compiled CFR$^{+}$ iteration under simultaneous updates.}
+\label{alg:iteration}
+\begin{algorithmic}[1]
+\State $\strat \gets \mathrm{regret\_matching}(\regret)$ \Comment{flat over $\numslots$ slots; segment-normalized}
+\For{$b = 1, \dots, D$} \Comment{forward, both lanes at once, \cref{eq:lanes}}
+    \State $\reach[C_2(b)] \gets \reach[P_2(b)] \cdot \strat_{\mathrm{ext}}[S_2(b)]$
+\EndFor
+\State $\cfv \gets \cfv_{\mathrm{tmpl}}$ \Comment{chance-weighted payoffs, \cref{eq:template}}
+\For{$b = D, \dots, 1$} \Comment{backward values}
+    \State $\cfv.\mathrm{index\_add}\big(P_{\mathrm{val}}(b),\; \strat_{\mathrm{ext}}[S_{\mathrm{val}}(b)] \cdot \cfv[C_{\mathrm{val}}(b)]\big)$
+    \State $\regret.\mathrm{index\_add}\big(S_{\mathrm{reg}}(b),\; s(b) \cdot \reach[O_{\mathrm{reg}}(b)] \cdot (\cfv[C_{\mathrm{reg}}(b)] - \cfv[P_{\mathrm{reg}}(b)])\big)$ \Comment{\cref{eq:instregret}, decision edges only}\label{alg:regretline}
+\EndFor
+\State $\bar{s} \mathrel{+}= w_t \cdot \reach_{\mathrm{own}} \cdot \strat$;\qquad
+       $\regret \gets \max(\regret, 0)$ \Comment{update rule (here: CFR$^{+}$)}
+\end{algorithmic}
+\end{algorithm}
+
+\cref{alg:iteration} summarizes the iteration, where $w_t$ is the averaging weight.
+Alternating updates \cite{burch2019revisiting} run its body twice per iteration,
+once per player, and restrict the regret update and the regret matching$^{+}$ clamp
+to the acting player's slots. The player order is static, so every index array and
+the captured graph stay the same. \Cref{tab:opsteps} lists the realized operation
+schedule. One realization detail: the regret scatter of line~\ref{alg:regretline}
+is hoisted out of the level loop and applied once, flat over all decision edges after
+the value pass. The average-strategy accumulation shares the same flat scatter. The
+parent and child values it reads are final by then, so the flat scatter accumulates
+the same summands in a different grouping. Only the forward and value recurrences contribute
+to the depth-proportional term. The result is a fixed sequence of eight Aten
+\cite{paszke2019pytorch} operations per depth level plus a constant part: 64--152
+operations per iteration across the suite. A reference implementation of the same
+algorithm with per-(stage, depth) blocks, masked chance handling, and per-iteration
+allocations needs 110--1{,}742 (\cref{tab:suite}). The Aten-operation count is
+exactly reproducible and independent of machine load. It therefore serves both as a
+regression gate (\cref{sec:correctness}) and as a benchmarking instrument.
+
+\input{sections/tab_opsteps}
+
+\subsection{CUDA-graph execution}
+\label{sec:cudagraph}
+
+Even at 96 operations per iteration, a 434k-state game runs each GPU kernel for only
+microseconds, so framework dispatch and kernel launches dominate wall-clock time. The
+compiled dataflow executes eagerly at \eagerMsRange\,ms per iteration on an A100
+across our suite, largely independent of tree size, the signature of a launch-bound
+workload. Because the operation sequence, tensor shapes, and buffer
+addresses are all fixed, the entire iteration qualifies for CUDA-graph capture
+\cite{guide2020cuda}: record the kernel sequence once, then replay it with one graph
+launch per iteration. CUDA graphs remove per-kernel launch and dispatcher overhead
+and leave the kernels themselves unchanged, so the same kernels run back to back.
+\Cref{app:profile} measures hand-fused kernels and \cref{app:compiler} lists the
+compiler passes.
+
+Three details make capture faithful to eager execution. First, CFR$^{+}$'s
+linear-averaging weight $w_t = t$ changes every iteration, which a static graph
+cannot see. We keep $w$ in a 0-dimensional device tensor that the captured body
+increments in place after use. Before each replay batch the host refills it with the
+exact starting index, so replay $k$ uses precisely $w = t_0 + k$ and matches eager
+execution bit for bit. The counter is float32 in every reported run and represents
+$w$ exactly up to $2^{24}$ iterations. Second, capture must be preceded by warmup
+iterations on a side stream. In GPU-CFR these are genuine eager iterations that count
+toward the iteration budget, and the accounting is preserved across arbitrarily split
+solver calls. Third, replaying a graph whose buffers have been reallocated would
+silently read stale memory. The solver stores the data pointers of all eight
+persistent buffers at capture time and refuses to replay if any has changed. If
+capture itself fails, for example on an unsupported driver, the solver warns once and
+falls back to eager execution. The fallback runs the same kernels in the same order
+and, within one process, computes the identical floats.
+
+Graph replay cuts steady-state iteration time by \eagerGraphRange$\times$
+depending on tree size (\cref{tab:matrix}, \cref{app:extra}). The two largest games
+run at \graphMsTwoLargest\,ms per iteration. One-time capture cost
+(0.037--0.301\,s) lands in the first solver call, and \cref{sec:results} reports
+steady-state and end-to-end numbers separately.
+
+\subsection{Layered verification}
+\label{sec:correctness}
+
+Verification proceeds at three levels. First, graph replay and compiled eager
+execution run the same kernels in the same order and agree bitwise over 30 iterations
+within one process.
+Second, the compiled dataflow is compared with the pre-optimization implementation.
+The two agree bitwise in float32 after 22 iterations on all eight benchmark games
+(\cref{tab:suite}; CPU, fixed reduction order) and to $10^{-12}$ in float64 over 30
+iterations. Third, independently written implementations provide tolerance-level
+checks on values and exploitability.
+
+GPU scatter reductions can accumulate in different orders across independent
+processes. Near an indifferent action a last-bit difference can separate subsequent
+trajectories: on the HUNL river subgame, 4 of 20 identical runs reach a second
+exploitability cluster $0.6\%$ away. \Cref{app:correctness} traces this to
+reduction order and quantifies its effect. The verification layers are:
+\begin{enumerate}
+    \item \textbf{Reference-oracle parity.} A complete copy of the solver from
+    before optimization is preserved inside the test suite and compared as above,
+    across $\{$CFR, CFR$^{+}\} \times \{$uniform, linear$\}$ averaging.
+    \item \textbf{Independent reference solver.} A per-node Python implementation,
+    sharing no code with the compiled path, must agree to $10^{-9}$ on the poker
+    subgames.
+    \item \textbf{Best-response oracles and analytic anchors.} An exact recursive best-response oracle \cite{johanson2011accelerating}, checked
+    by brute-force strategy enumeration on small instances, validates the evaluator.
+    Analytic cases pin absolute values.
+    \item \textbf{Operation-count regression gates.} The per-iteration count of
+    Aten operations is asserted against the affine schedule size $c_1 + c_2 D$ of
+    \cref{sec:theory}, and graph replay is compared with eager execution over 30
+    iterations. These deterministic checks complement wall-clock measurements.
+\end{enumerate}
+The full test inventory (499 tests) appears in \cref{app:correctness}.

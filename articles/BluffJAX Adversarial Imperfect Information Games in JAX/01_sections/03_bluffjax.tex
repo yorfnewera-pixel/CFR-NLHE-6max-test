@@ -1,0 +1,70 @@
+\section{BluffJAX}
+In this section, we discuss our choices of environments, API, and design elements of BluffJAX. Full details of the games, including mechanics, observation/action spaces, and rewards are available in Appendix~\ref{supp:games}. A thorough discussion of the API and particular design choices is available in Appendix~\ref{supp:design}. 
+
+\subsection{Environments}
+We aim for a mixture of toy environments, well-studied games, and new games in BluffJAX. A summary of the 10 implemented games is available in Table~\ref{tab:games}, where we note the number of agents, observation size, number of actions, number of JAX branches, and the performance metric for each game. Note that the number of JAX branches refers to the number of parallel executions at each timestep in game logic, which is not necessarily equal to the branching factor of the game.
+
+\textbf{Kuhn Poker}~\citep{kuhn1953extensive} and \textbf{Leduc Poker} are well-studied and theoretically solved poker variants, in that their exact exploitability and equilibrium strategies are tractable. In this paper, we benchmark some common RL and game-theoretic algorithms on Kuhn and Leduc Poker in order to validate our implementations and motivate our choices for baselines in more complex environments.
+
+\textbf{Texas Hold'Em Limit Poker} and \textbf{Texas Hold'Em No-Limit Poker} are commonly-studied poker variants which present sufficient challenges to existing game-solving algorithms. They are typically implemented with certain abstractions for simplification; e.g. fixed increment sizes and simple bankroll management. 
+
+We also introduce two lesser-known poker variants that include mechanics that we believe pose interesting challenges for current RL algorithms. In \textbf{5 Card Draw Poker}, players build a hand between betting rounds by exchanging cards with the house, which moves the signaling focus (which is typically on bet sizes and public cards) to the exchanges made by players. The exchange mechanic introduces a new dimension of play, as agents must consider more sources of deception with less information. \textbf{7 Card Stud Poker} is a variant where player hands are revealed across multiple betting rounds, requiring reasoning based on public information and betting history. Stud Poker differs to Texas Hold'Em as a game with longer horizons, higher information density, and more dynamic strategies.
+
+\textbf{Goofspiel} is a 2-player simultaneous-move game which simulates simple auctions; each round consists of players making a fixed bet for a random, visible prize until no prizes or bids remain. Pure strategies in Goofspiel are strictly dominated, requiring agents to model stochastic strategies in order to avoid exploitation.
+
+\textbf{Bluff (AKA Cheat, I Doubt It)} is a card game where each player aims to reduce their hand to 0 by discarding cards in a constrained order - players have the option to lie about which cards they are discarding. Bluff presents a unique challenge among the BluffJAX environments, as agents must evade detection in long episodes in order to succeed.
+
+\textbf{Werewolf} is a team-based social role game that has been studied in the context of reasoning and cooperation among Large Language Models. In BluffJAX, we introduce the first JAX-based implementation of multi-round werewolf with multiple roles. As a social deduction game, werewolf requires agents to cooperate with other members of their respective team in order to win. \textbf{Kemps} is a team game centered around communication where agents play in teams of two and aim to build a hand of a certain rank. To win, they must publicly signal their teammate about their complete hand at the risk of getting caught by opposing teams.
+
+\begin{table}[htbp]
+    \caption{Games in BluffJAX. Note than in several games, the observation size depends on n. Note also that Kemps contains an explicit communication channel (default size 2).}
+    \begin{center}
+        \begin{tabular}{lrrrrl}
+        \hline
+            \multicolumn{1}{c}{Environment}  &\multicolumn{1}{c}{n}  &\multicolumn{1}{c}{Obs. size} &\multicolumn{1}{c}{\# Actions} &\multicolumn{1}{c}{\# Branches}  &\multicolumn{1}{c}{Metric} 
+            \\ \hline
+            Kuhn Poker & 2 & 9 & 2 & 1 & exploitability   \\
+            Leduc Poker & 2 & 36 & 3 & 3 & exploitability  \\
+            THL Poker & 2-10 & 72+n & 4 & 4 & chips/hand  \\
+            THNL Poker & 2-10 & 54 & 5 & 5 & chips/hand  \\
+            5 Card Draw  & 2-10 & 54 & 37 & 11 & chips/hand  \\
+            7 Card Stud  & 2-10 & 77+208(n-1)+n & 4 & 4 & chips/hand  \\
+            Goofspiel & 2 & 39 & 13 & 1 & win rate  \\
+            Bluff & $\geq$3 & 263 & 13 & 10 & win rate  \\
+            Werewolf & 6 & 43 & 7 & 7 & win rate  \\
+            Kemps & 4,6,8.. & 52(n+1) + n(comm) & 172*comm. & 1 & win rate \\
+            \hline
+        \end{tabular}
+    \end{center}
+    % \caption{Sample table caption}
+    \label{tab:games}
+\end{table}
+
+\subsection{API}
+The API supports both parallel and agent-environment-cycle environments (AEC) with generic base classes that can be easily modified in order to fulfill specific game logic. Unlike other suites which use a dual API format~\citep{terry2021pettingzoo}, BluffJAX forgoes agent iterator cycles in favor of handling agent transitions and reset logic internally for ease of use. For ease of use for researchers more familiar with other libraries, wrappers for the APIs of JaxMARL and PettingZoo are available. Since most research in imperfect information games is done in self-play, we find that the most efficient pattern is to keep the agent-environment interface agent-agnostic by default, allowing specific placement of agents if required. Games such as Bluff, Goofspiel, and Kemps are easily customizable and can be run at different difficulty levels by simply changing certain environments parameters.
+
+The following code snippet shows the basic usage of BluffJAX to run 1000 agent actions in 16 parallel environments:
+
+\begin{lstlisting}[language=Python]
+import jax
+import bluffjax
+import agent
+
+env=make("kuhn_poker") # Create an environment
+rng=jax.random.key(seed=42)
+rng_resets=jax.random.split(rng,16) # 16 parallel environments
+state,obs=jax.vmap(env.reset)(rng_resets)
+
+def step(carry,unused):
+    state,obs=carry
+    action=jax.vmap(agent.get_action)(obs)
+    state,obs,rew,absorbing,done,info=jax.vmap(env.step)(state,action)
+    return (state,obs),rew
+
+def step_scan(state,obs):
+    return jax.lax.scan(step,(state,obs),None,length=1000)
+    
+(final_state,final_obs),rew=jax.jit(step_scan)(state,obs)
+\end{lstlisting}
+
+We use this snippet to explain some features of our API and functional JAX programming for those unfamiliar. The object \mintinline{Python}{rng} is a pseudorandom key generated deterministically by an initial seed. Unlike NumPy, JAX requires explicitly passing pseudorandom keys to functions that require randomness\footnote{https://docs.jax.dev/en/latest/random-numbers.html}. \mintinline{Python}{jax.random.split} deterministically splits a pseudorandom key into multiple keys that may be used by separate random functions. \mintinline{Python}{jax.vmap} is a vectorizing map which maps a function over vectorized arguments - in this case, \mintinline{Python}{env.reset} is vectorized over an array of reset keys, producing vectorized states and obs arrays. \mintinline{Python}{state} contains all the information that defines the current game state, including the current player and public/private information. \mintinline{Python}{obs} is a vector observation for the current player. \mintinline{Python}{env.step} takes the current state and action and generates the next state, the observations for the next player, and a vector of rewards for all agents. The function \mintinline{Python}{step} is converted into a \mintinline{Python}{jax.lax.scan} function with \mintinline{Python}{length=1000} to indicate 1000 sequential steps within each parallel environment. Finally, \mintinline{Python}{step_scan} outputs the final carry and vectorized reward outputs.

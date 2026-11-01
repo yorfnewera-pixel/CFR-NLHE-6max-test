@@ -1,0 +1,102 @@
+\section{Extended Related Work}
+\label{app:related-work}
+
+Table~\ref{tab:main-separation} compares the closest theorem and method
+interfaces.  The relevant distinction is the complete decision tuple, not the
+shared vocabulary of sampling, batching, or component order.
+
+\begin{table}[h]
+\caption{Closest interfaces to debit-budgeted public feedback.}
+\label{tab:main-separation}
+\centering\footnotesize
+\begin{tabularx}{\linewidth}{@{}p{0.16\linewidth}XX@{}}
+\toprule
+Interface & Established conclusion & Missing interface component \\
+\midrule
+MCCFR and Public Chance Sampling
+& Regret from randomly sampled terminal-history or public-chance blocks.
+& Their guarantees use conditional target validity; they do not control a
+deterministic history-coupled public error or select partial versus exact
+coverage. \\
+\addlinespace
+Generalized and stochastic CFR
+& Modular regret minimization with bounded unbiased value or gradient
+estimators.
+& The martingale comparison fails when a without-replacement public order is
+coupled to the evolving learner state. \\
+\addlinespace
+Lazy CFR
+& Reach-aware skipping and aggregation of information-set updates.
+& It changes which information sets update, not which public components form
+one target row; it has no dense target-debit budget. \\
+\addlinespace
+GraB and random reshuffling
+& History-dependent component order and discrepancy-based rates in smooth
+finite-sum optimization.
+& They do not supply counterfactual local-regret reduction, the alternating
+output bridge, or a zero-debit public action. \\
+\addlinespace
+Aligned persistent MCCFR
+& Guarantees on owner-thinned sparse chance streams in External Sampling.
+& It addresses a persistent-state key under opponent sampling, not width and
+order over one explicit finite public cut. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Sampling-based CFR.}
+MCCFR partitions terminal histories and constructs a sampled counterfactual
+value whose expectation equals the dense value
+\citep{lanctot2009mccfr}.  Public Chance Sampling specializes the partition to
+public outcomes and exploits vectorized reuse over private chance
+\citep{johanson2012pcs}.  Generalized sampling permits any bounded unbiased
+value estimator and makes estimator variance explicit
+\citep{gibson2012generalized}; stochastic regret minimization similarly
+combines a regret minimizer with conditionally unbiased gradient estimates
+\citep{farina2020stochastic}.  A deterministic remaining batch in a
+without-replacement epoch has no such eventwise conditional law.  DB-CFR
+instead compares the realized delivered sum directly with the dense target
+sum and charges only target-regret underestimation.
+
+\paragraph{Order and delayed computation.}
+Random reshuffling, quasi--Monte Carlo integration, and GraB connect component
+order or discrepancy with temporal variation
+\citep{niederreiter1992qmc,lu2022grab,das2022withoutreplacement}.  Lazy CFR
+uses reach structure to update a subset of information sets while aggregating
+their skipped counterfactual rewards \citep{zhou2020lazy}.  These are important
+ingredients and analogies.  The nonroutine step here is the full-game
+composition: centered public components are evaluated at native alternating
+origins, transferred through local counterfactual regret, and constrained by
+a causal one-sided debit with an exact feasible action.
+
+Online learning with delayed feedback instead postpones the loss, gradient,
+or reward needed for the learner update
+\citep{joulani2013delay,flaspohler2021delay}.  In DB-CFR, the selected partial
+row reaches RM/RM+ immediately and changes the next policy; only the separate
+dense-target audit is unsettled.  The outstanding correction therefore enters
+the delivered-to-target transfer as a debit reserve rather than as delayed
+learner regret.  This distinction also separates the theorem from generic
+asynchronous CFR implementations, which change when regret updates are
+applied.
+
+\paragraph{Approximate feedback and execution.}
+Functional and approximate regret matching charge per-round input error
+\citep{waugh2015functional,dorazio2019approximate}.  Such a symmetric charge
+is valid but can discard the signed cancellation within a balanced public
+epoch.  Equation~\ref{eq:app-weighted-deadline-identity} retains this
+cancellation.
+Dataflow systems and parallel CFR supply grouping, progress, and physical
+execution mechanisms \citep{akidau2015dataflow,murray2013naiad,kim2026parallel};
+the event-faithful contract uses those ideas only to preserve one declared
+learner transition.  They do not define the target-game row or its regret
+transfer.
+
+\paragraph{Concurrent persistent MCCFR.}
+A concurrent anonymous submission studies a distinct failure mode:
+alternating External-Sampling traversals adaptively thin a persistent
+concrete-node chance stream into learner-specific subsequences
+\citep{anonymous2027amccfr}.  Its owner--node key, sampled-tree recursion, and
+opponent martingale do not appear here.  Conversely, DB-CFR's public width,
+one-sided debit, complete-coverage fallback, HUNL frontier, and public-Leduc
+controller do not appear in that work.  Both use finite summation by parts as
+classical algebra.

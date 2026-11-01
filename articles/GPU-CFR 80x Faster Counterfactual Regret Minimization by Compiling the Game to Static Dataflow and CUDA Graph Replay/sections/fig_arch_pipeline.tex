@@ -1,0 +1,169 @@
+% Arch-1: the game-to-dataflow compilation pipeline, drawn as objects rather than
+% labeled boxes. Single-column, drawn at native size and fitted to the column width.
+% Top: an 11-node example tree (1 chance root, 2 P1 decisions, 2 P2 decisions,
+% 6 terminals) over alternating depth bands, with one-word glyph labels at the
+% first occurrence of each node kind. Middle: thick mapping lines funnel every
+% node into its breadth-first cell of the flat node array, above the values
+% template. Bottom: the run-time submission timelines (eager vs captured graph).
+\begin{figure}[!htb]
+\begin{minipage}[b]{0.50\linewidth}\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+    font=\sffamily\small,
+    dec1/.style={circle, draw=teal!60!black, fill=teal!45, minimum size=3.4mm, inner sep=0pt},
+    dec2/.style={circle, draw=violet!60!black, fill=violet!40, minimum size=3.4mm, inner sep=0pt},
+    chn/.style={diamond, draw=black!65, fill=black!22, minimum size=4.2mm, inner sep=0pt},
+    ter/.style={rectangle, draw=black!70, fill=black!55, minimum size=2.5mm, inner sep=0pt},
+    edge/.style={black!55, line width=0.9pt},
+    flow/.style={-{Stealth[length=2.2mm]}, line width=1.0pt, black!60},
+    fold/.style={-{Stealth[length=1.8mm]}, densely dashed, line width=0.8pt, black!55},
+    mapline/.style={line width=1.0pt, opacity=0.80, shorten <=1.4pt},
+    tick/.style={orange!80!black, line width=1.0pt},
+    gtick/.style={orange!95!black, line width=1.6pt},
+    note/.style={font=\sffamily\small, text=black!55},
+    lanelabel/.style={font=\sffamily\small\bfseries, text=black!60}
+]
+% ================= build lane: tree over its flattened arrays =================
+% alternating depth bands behind the tree
+\foreach \y in {0, -1.7}
+  \fill[blue!6] (0.10,\y+0.33) rectangle (7.95,\y-0.33);
+% --- example game tree; left margin below stays clear for the compile label ---
+\node[chn]  (c0)  at (4.60, 0.00) {};
+\node[dec1] (p1a) at (2.60,-0.85) {};
+\node[dec1] (p1b) at (6.60,-0.85) {};
+\node[dec2] (q2a) at (1.70,-1.70) {};
+\node[ter]  (t2a) at (3.50,-1.70) {};
+\node[dec2] (q2b) at (5.70,-1.70) {};
+\node[ter]  (t2b) at (7.60,-1.70) {};
+\node[ter]  (t3a) at (1.30,-2.55) {};
+\node[ter]  (t3b) at (2.30,-2.55) {};
+\node[ter]  (t3c) at (5.20,-2.55) {};
+\node[ter]  (t3d) at (6.20,-2.55) {};
+\draw[edge, densely dashed] (c0) -- (p1a);
+\draw[edge, densely dashed] (c0) -- (p1b);
+\draw[edge] (p1a) -- (q2a); \draw[edge] (p1a) -- (t2a);
+\draw[edge] (p1b) -- (q2b); \draw[edge] (p1b) -- (t2b);
+\draw[edge] (q2a) -- (t3a); \draw[edge] (q2a) -- (t3b);
+\draw[edge] (q2b) -- (t3c); \draw[edge] (q2b) -- (t3d);
+% a compact standalone glyph legend keeps labels off the tree
+\node[chn, minimum size=3.2mm] (legchance) at (0.55,0.62) {};
+\node[note, anchor=west] at (0.98,0.62) {chance};
+\node[dec1, minimum size=3.0mm] (legp1) at (2.30,0.62) {};
+\node[note, anchor=west] at (2.73,0.62) {P1};
+\node[dec2, minimum size=3.0mm] (legp2) at (3.48,0.62) {};
+\node[note, anchor=west] at (3.91,0.62) {P2};
+\node[ter, minimum size=2.4mm] (legterm) at (4.70,0.62) {};
+\node[note, anchor=west] at (5.13,0.62) {terminal node};
+
+% ================= flat arrays (BFS order, depth-segmented) =================
+\def\cw{0.62}
+\def\sx{0.72}
+\def\slotb{-4.17}   % node strip bottom (top = -4.05)
+\def\tmplb{-5.87}   % template strip bottom (top = -5.75)
+% mapping fan: every tree node funnels into its BFS cell (compile = walk once).
+% Each line first drops straight out of the tree, then converges inside the
+% dedicated fan band so crossings never overlap the tree itself.
+\foreach \n/\i/\c in {c0/0/black!50, p1a/1/teal!75, p1b/2/teal!75,
+                      q2a/3/violet!75, t2a/4/black!50, q2b/5/violet!75,
+                      t2b/6/black!50, t3a/7/black!50, t3b/8/black!50,
+                      t3c/9/black!50, t3d/10/black!50}
+  \draw[mapline, \c] (\n.south) -- (\n.south |- 0,-2.85)
+    .. controls (\n.south |- 0,-3.25) and ({\sx+(\i+0.5)*\cw},-3.10) ..
+    ({\sx+(\i+0.5)*\cw},\slotb+\cw);
+\node[note, align=left, anchor=west] at (0.00,-3.02) {compile\\walk once};
+% node strip: cells keep the color of their tree node, in BFS order
+\node[note, anchor=east] at (\sx-0.10,\slotb+0.5*\cw) {nodes};
+\foreach [count=\i from 0] \c in
+  {black!22, teal!45, teal!45, violet!40, black!55, violet!40, black!55,
+   black!55, black!55, black!55, black!55}{
+  \draw[black!60, fill=\c] ({\sx+\i*\cw},\slotb) rectangle ++(\cw,\cw);
+}
+% chance slot carries no run-time work: overlay dashed hatch look
+\draw[black!60, densely dashed, fill=white, fill opacity=0.55]
+  (\sx,\slotb) rectangle ++(\cw,\cw);
+% depth segment separators + labels
+\foreach \s in {0, 1, 3, 7, 11}
+  \draw[black!85, line width=1.2pt] ({\sx+\s*\cw},\slotb-0.05) -- ++(0,\cw+0.10);
+\foreach \d/\a/\b in {0/0/1, 1/1/3, 2/3/7, 3/7/11}
+  \node[note] at ({\sx+(\a+\b)*\cw/2},\slotb-0.26) {$d{=}\d$};
+% per-depth index blocks: one gather/scatter block arrow per segment
+\foreach \a/\b in {1/3, 3/7, 7/11}
+  \draw[flow, line width=0.9pt, -{Stealth[length=1.8mm]}]
+    ({\sx+\a*\cw+0.06},\slotb-0.56) -- ({\sx+\b*\cw-0.06},\slotb-0.56);
+\node[note] at ({\sx+9*\cw},\slotb-0.86) {$D$ blocks};
+% values template strip: only terminal cells are pre-filled
+\node[note, anchor=east] at (\sx-0.10,\tmplb+0.5*\cw) {$\cfv_{\mathrm{tmpl}}$};
+\foreach [count=\i from 0] \c in
+  {white, white, white, white, black!55, white, black!55,
+   black!55, black!55, black!55, black!55}{
+  \draw[black!60, fill=\c] ({\sx+\i*\cw},\tmplb) rectangle ++(\cw,\cw);
+}
+\foreach \s in {0, 1, 3, 7, 11}
+  \draw[black!85, line width=1.2pt] ({\sx+\s*\cw},\tmplb-0.05) -- ++(0,\cw+0.10);
+% chance folding: the run-time-free chance slot melts into the template
+\draw[fold] ({\sx+0.04},\slotb)
+  .. controls (0.28,-4.60) and (0.28,-4.95) .. ({\sx+0.08},\tmplb+\cw)
+  node[note, pos=0.5, left=0.6mm] {fold};
+
+% ================= run lane: submission timelines =================
+\begin{scope}[yshift=-0.10cm]
+\def\wzero{1.66}
+\def\itw{1.62}
+\def\itg{0.14}
+% three iteration windows, shaded alternately, shared by both rows
+\foreach \i/\f in {0/black!5, 1/black!0, 2/black!5}
+  \fill[\f] ({\wzero+\i*(\itw+\itg)},-7.30) rectangle ++(\itw,-1.15);
+\node[note] at ({\wzero+0.5*\itw},-7.46) {one iteration};
+% eager row: one launch tick per tensor op, dense within every iteration
+\node[note, anchor=east] at (0.72,-7.78) {eager};
+\draw[black!35] (\wzero,-7.78) -- ({\wzero+3*\itw+2*\itg},-7.78);
+\foreach \i in {0,1,2}{
+  \foreach \k in {0,...,8}{
+    \draw[tick] ({\wzero+0.18+\i*(\itw+\itg)+\k*0.17},-7.65) -- ++(0,-0.26);
+  }
+}
+% graph row: record once, then a single submission per iteration
+\node[note, anchor=east] at (0.72,-8.25) {graph};
+\draw[black!35] (\wzero,-8.25) -- ({\wzero+3*\itw+2*\itg},-8.25);
+\node[draw=orange!80!black, fill=orange!25, rounded corners=1.5pt,
+      minimum height=3.4mm, inner sep=1.6pt, anchor=east]
+  at ({\wzero-0.08},-8.25) {record};
+\foreach \i in {0,1,2}{
+  \draw[gtick] ({\wzero+0.18+\i*(\itw+\itg)},-8.06) -- ++(0,-0.38);
+}
+\draw[flow, line width=0.9pt]
+  ({\wzero+3*\itw+2*\itg},-8.25) -- ++(0.26,0);
+\node[note, align=left, anchor=west] at (7.10,-8.25) {replay\\$\times T$};
+% time axis hint
+\draw[-{Stealth[length=1.6mm]}, black!40] (5.50,-8.65) -- (6.70,-8.65)
+  node[note, pos=0.5, above=0.2mm] {time};
+\end{scope}
+
+% ================= lane frames =================
+\begin{scope}[on background layer]
+\node[draw=blue!45!black!30, rounded corners=3pt, inner sep=1.2mm, fill=blue!3,
+      fit={(-0.22,0.88) (8.14,-6.35)}] (buildlane) {};
+\node[draw=orange!70!black!30, rounded corners=3pt, inner sep=1.2mm, fill=orange!4,
+      fit={(-0.22,-7.15) (8.14,-9.00)}] (runlane) {};
+\end{scope}
+\node[lanelabel, anchor=south west] at (buildlane.north west)
+  {Build: once per game};
+\node[lanelabel, anchor=south west] at (runlane.north west)
+  {Run: every iteration};
+\end{tikzpicture}}
+\caption{The compilation pipeline on an 11-node example game. A build-time walk
+flattens the tree into the depth-segmented node array and values template
+(colored lines trace each node to its cell); at run time, eager execution
+submits $c_1 + c_2 D$ framework operations per iteration (each one or more kernel
+launches), graph replay one graph launch.}
+\Description{Two-lane diagram. The build-time lane shows a small game tree with
+a diamond chance root, colored decision nodes, and square terminals over
+alternating depth bands; thick colored lines funnel every node into its
+breadth-first cell of a flat array strip divided into depth segments, above a
+values-template strip whose terminal cells are pre-filled; a short dashed arrow
+folds the chance slot into that template. The run-time lane shows two aligned
+timelines over three shaded iteration windows: the eager row has a dense comb
+of launch ticks in every window, while the graph row has one record block
+followed by a single tick per window and an arrow labeled replay times T.}
+\label{fig:archpipeline}
+\end{minipage}\hfill%

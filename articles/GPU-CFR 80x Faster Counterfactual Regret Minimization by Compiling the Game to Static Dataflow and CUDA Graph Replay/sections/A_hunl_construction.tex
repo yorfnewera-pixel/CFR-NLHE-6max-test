@@ -1,0 +1,104 @@
+\section{HUNL Subgame Construction}
+\label{app:hunl}
+
+\paragraph{The two native subgames.}
+The native \emph{river} subgame (3{,}000 Infosets) deals non-conflicting hand pairs over
+a fixed board and plays one street of check\slash bet\slash fold\slash call with
+exact hand evaluation.
+The \emph{turn} subgame (83{,}040 Infosets) adds a 44-card river chance layer between two
+betting streets, with $K{=}12$ hands per player, sunk-cost payoffs, fractional
+pot-based bet sizing, and all-in handling. These fixed-board, fixed-range trees
+capture the repeated re-solving structure of HUNL-style workloads
+\cite{burch2014solving,ganzfried2015endgame}.
+
+\paragraph{Background: subgame solving and online re-solving.}
+Decomposition solves subgames independently given summaries of the rest of the game
+\cite{burch2014solving}, with safety refinements \cite{brown2017safe,zhang2021subgame},
+practical endgame solving \cite{ganzfried2015endgame,moravcik2016refining}, and
+depth-limited variants that cap the lookahead with value estimates
+\cite{brown2018depth,kovavrik2023value,kroer2020limited}. DeepStack's
+continual re-solving \cite{moravvcik2017deepstack,vsustr2019monte,sustr2020sound} and
+Libratus's endgame solver
+\cite{brown2018superhuman} run exactly this workload online, under second-scale time
+budgets. Our two native HUNL subgames reproduce the structure of this workload, while
+\cref{sec:hunl} separates their reusable compilation cost from marginal solver time.
+
+Both native subgames use exact 7-card hand evaluation ported from a production poker
+engine and validated against brute-force enumeration.
+
+\paragraph{River subgame.}
+Fixed board (default \texttt{Ks Js Th 7d 2c}), pot 20, stacks 100. A chance root deals
+each player one of $K{=}100$ candidate hands, uniformly over non-conflicting pairs
+(9{,}161 deals). One betting street: check/bet/fold/call with bet fractions
+$\{0.5, 1.0\}$ of the pot, no raises. Payoffs at showdown are $\pm(\text{half pot} +
+\text{matched bets})$; folds forfeit the half-pot plus any called amount. The default
+instance has 3{,}000 Infosets on 137{,}415 States.
+
+\paragraph{Turn subgame.}
+Board \texttt{Ks Js Th 7d} plus a full 44-card river chance layer. Each player holds
+one of $K{=}12$ hands ($131$ non-conflicting deals at the default seed); betting
+occurs on the turn and again on the river, with fraction-of-pot sizing
+$b = \min(\text{stack} - \text{committed},\, f \cdot \text{pot})$ and all-in handling
+(no river betting after all-in). Payoffs use \emph{sunk-cost} semantics: a turn fold
+loses the half-pot; a river fold additionally loses the caller's committed chips;
+showdown transfers the half-pot plus matched wagers. The default instance has
+83{,}040 Infosets on 433{,}610 States, and tree depth yielding 8 fused execution
+blocks per pass.
+
+\paragraph{Analytic anchors.}
+Two closed-form checks pin absolute correctness of payoffs, chance weighting, and the
+evaluator simultaneously. (i)~River nuts anchor: if one player's range contains only
+the best possible hand, the equilibrium value in exact arithmetic is the half-pot,
+$+10$; the implemented game's chance discretization shifts this to an enumerable
+$+10.000033$, which the solver and a brute-force best-response enumeration both
+reproduce to $10^{-10}$.
+(ii)~Quads anchor: on the board \texttt{7s 7d 7h Ks} with hole cards \texttt{7c 2d},
+four-of-a-kind wins all 44 rivers, forcing root value $+10$; the solver converges to
+it with exploitability below $10^{-3}$ after 1{,}000 iterations.
+
+\paragraph{Best-response oracle.}
+A recursive exact oracle, weighted by counterfactual reach and expanded deepest
+first, validates the generic evaluator on these games to $10^{-9}$. The oracle itself is
+validated by brute-force enumeration of all pure strategies on reduced instances.
+
+\paragraph{External reconstruction of the river subgame.}
+The river subgame can be reconstructed outside our codebase, providing an independent
+instance for the
+head-to-head timings of \cref{sec:results}. We express it as an OpenSpiel
+\texttt{universal\_poker} ACPC instance \cite{lanctot2019openspiel}: fixed five-card
+board, \texttt{handReaches} marking the $K{=}100$ candidate hands per player, and one
+betting round with two bet sizes. Three details decide whether the two games coincide.
+The chips-behind parameter is set to the largest bet in our abstraction (below the
+nominal stack), so that \texttt{universal\_poker}'s all-in action coincides with its
+pot-size bet and is deduplicated away; at the nominal stack the external game acquires a
+third bet size and is strictly larger. The \texttt{handReaches} slot order is
+lexicographic in $(\mathrm{lo}, \mathrm{hi})$ with $\mathrm{card} = 4\,\mathrm{rank} +
+\mathrm{suit}$ over ranks $2{\ldots}\mathrm{A}$ and suits $s, h, d, c$, which differs
+from GPU-CFR's own renderer in both rank and suit order. The opening action order is a
+permutation of GPU-CFR's, so strategies are compared by action name and never by position.
+Under this mapping the two constructions agree exactly on 137{,}416 nodes and 9{,}161
+deals, and on the payoff at every terminal.
+
+The mapping is verified at the level of the iterate as well as the tree: after three
+alternating CFR$^+$ iterations an independent from-scratch reference solver over the
+external representation and GPU-CFR over its own representation reach exploitability
+$1.6107099050007263$ and $1.6107099050007272$ respectively. The reference solver is itself pinned
+against OpenSpiel's own CFR and CFR$^+$ on Kuhn poker at 1, 10, and 100 iterations to
+$10^{-9}$; OpenSpiel's solvers cannot be run on the river subgame directly, because
+\texttt{universal\_poker} enumerates all $1{,}624{,}350$ deals with the excluded ones at
+probability zero and their tabular policy does not admit card removal. Exploitability
+for the external arm is therefore scored by our own exact tabular best response, the
+same evaluator used by every other arm.
+
+\paragraph{Scope of the external reconstruction.}
+The turn subgame is deliberately not reconstructed in \texttt{universal\_poker}. Its
+all-in deduplication would have to hold on the turn and again on the river, and a
+single chips-behind parameter cannot satisfy both: any value that collapses all-in
+into the pot-size bet on one street splits them on the other. Because a game that differs from the one we solve would confound the comparison,
+the \texttt{universal\_poker} arm
+covers the river subgame and the turn subgame is reported against our own arms.
+
+External HUNL head-to-heads do not depend on that reconstruction at all. The Libratus
+endgames are read from the same released endgame files by both our builder and
+PokerRL, and both external CFR baselines solve our own trees directly from the export
+of \cref{app:libratus}, so those comparisons are on a single shared game.

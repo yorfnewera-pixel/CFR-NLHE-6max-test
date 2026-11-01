@@ -1,0 +1,85 @@
+\section{Deterministic Public Feedback as a Control Problem}
+\label{sec:background}
+
+\paragraph{Game, local rows, and output.}
+Fix a finite two-player zero-sum perfect-recall game with player-zero payoff
+$u_0=u=-u_1$.  Let $x$ and $y$ be realization plans and define
+\begin{equation}
+\operatorname{expl}(x,y)=\tfrac12\left[
+\max_{x'}u(x',y)-\min_{y'}u(x,y')\right].
+\label{eq:gap-definition}
+\end{equation}
+For information set $I$ owned by player $i$, write $\rho=(i,I)$ for its local
+row and $p_{\rho,t}$ for its behavior at round $t$.  If
+$v_{\rho,t}$ is the counterfactual action-value vector, its centered feedback
+is $v_{\rho,t}-\langle p_{\rho,t},v_{\rho,t}\rangle\one$.  Additive signed
+regret matching (RM) accumulates centered rows; additive RM+ clips the updated
+state coordinatewise at zero \citep{tammelin2014cfrplus}.  In both cases,
+regret matching normalizes the positive part of the state and uses the
+uniform distribution when its positive mass is zero, matching the solver
+implementation.  We use the native
+alternating recurrence
+$(x_t,y_t)\to(x_{t+1},y_t)\to(x_{t+1},y_{t+1})$ and predetermined
+nonnegative nondecreasing output weights $w_t$.  Put
+$W_T=\sum_{t=1}^T w_t>0$ and denote the weighted pre/pre average by
+$(\bar x_T^w,\bar y_T^w)$.
+
+\paragraph{Finite additive public cut.}
+Let $J$ contain $N$ semantic public labels.  For row $\rho$, label $j$, and
+the immutable consuming profile at event $t$, let
+$X_{\rho,t,j}$ be the centered contribution of label $j$.  A width-$B$ plan,
+where $B$ divides $N$, selects $S_t\subseteq J$ with $|S_t|=B$ and delivers
+\begin{equation}
+g_{\rho,t}=\sum_{j\in J}X_{\rho,t,j},\qquad
+h_{\rho,t}=\frac{N}{B}\sum_{j\in S_t}X_{\rho,t,j}.
+\label{eq:public-rows}
+\end{equation}
+Here $g_{\rho,t}$ is the dense full-cut target and $h_{\rho,t}$ is the row
+consumed by the learner.  Exactly evaluated terms outside the public cut are
+shared by both rows and cancel from their difference.  The appendix extends
+the notation to finitely many nonnested cuts and proves the additive
+decomposition from terminal-history linearity.
+
+Define the row error
+\begin{equation}
+\epsilon_{\rho,t}=h_{\rho,t}-g_{\rho,t}
+\label{eq:row-error}
+\end{equation}
+and, for any finite vector $z$, the one-sided underestimation gauge
+\begin{equation}
+\psi(z)=\pos{\max_a\{-z(a)\}}=\norm{[-z]_+}_\infty.
+\label{eq:psi}
+\end{equation}
+If $z$ is coordinatewise nonnegative, delivered cumulative feedback dominates
+the target and $\psi(z)=0$, even when $z\ne0$.  During player zero's update,
+define the target-payoff decrease
+\begin{equation}
+d_t=\pos{u(x_t,y_t)-u(x_{t+1},y_t)}.
+\label{eq:target-decrease}
+\end{equation}
+The public part of a block's exact target debit is the sum of the row gauges;
+the alternating part is the weighted sum of $d_t$.
+
+The common feedback regimes use different guarantees.  Complete coverage is
+exact at every origin, and independent public sampling is target valid through
+conditional expectation.  A persistent partial order instead balances counts
+across events with different learner origins; its connection to
+$g_{\rho,t}$ must therefore be established pathwise.
+
+\paragraph{Control decision and event-faithful execution.}
+At a completed block boundary, a candidate plan $a$ fixes a common number $m$
+of alternating rounds, a width $B$, a balanced public order, and an admissible
+physical executor.  The planner selects a plan from completed history and a
+settled debit account.  The selected plan executes once; its target-debit
+charge may be certified before execution or settled by an audit after the
+block.  Thus width and order are learner decisions, while processor placement
+is permitted only when it preserves the declared event record.
+
+All selected components of one learner event must use one immutable profile
+and join in a deterministic canonical order.  All rows owned by the updating
+player read the resulting common delivered payoff functional and update
+simultaneously in exactly one learner transition.  We call this contract
+\emph{event-faithful}.  Physical
+parallelism inside the join may change runtime but not the declared learner
+trajectory.  Complete coverage is the plan $B=N$, for which
+$h_{\rho,t}=g_{\rho,t}$ at every event.

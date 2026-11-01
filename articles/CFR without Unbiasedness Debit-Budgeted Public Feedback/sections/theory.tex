@@ -1,0 +1,291 @@
+\section{Target Debit and Exact-Fallback Control}
+\label{sec:theory}
+
+We first transfer regret from delivered rows to the dense target game, then
+turn the resulting correction into a causal plan constraint.
+
+Define delivered weighted positive local regret
+\begin{equation}
+\widehat{\mathcal R}_T^w=
+\sum_\rho\pos{\max_a\sum_{t=1}^T w_t h_{\rho,t}(a)}.
+\label{eq:delivered-positive-regret}
+\end{equation}
+Let
+$\Omega_0=\max_{x,x',y}\{u(x,y)-u(x',y)\}$, which is finite on the
+realization-plan polytopes.
+
+\begin{theorem}[Weighted target-debit transfer]
+\label{thm:weighted-target-debit}
+For every finite event-faithful execution under the declared additive public
+cut contract,
+\begin{equation}
+\boxed{
+\operatorname{expl}(\bar x_T^w,\bar y_T^w)
+\le\frac{1}{2W_T}\left[
+\widehat{\mathcal R}_T^w
++\sum_\rho\psi\!\left(\sum_{t=1}^T w_t\epsilon_{\rho,t}\right)
++\Omega_0w_T+\sum_{t=1}^T w_td_t
+\right].}
+\label{eq:weighted-target-debit}
+\end{equation}
+\end{theorem}
+
+\paragraph{Proof.}
+Put $H_\rho=\sum_t w_th_{\rho,t}$ and
+$E_\rho=\sum_t w_t\epsilon_{\rho,t}$, so the cumulative target row is
+$H_\rho-E_\rho$.  Rowwise,
+\begin{equation}
+\pos{\max_a(H_\rho(a)-E_\rho(a))}
+\le \pos{\max_a H_\rho(a)}+\psi(E_\rho).
+\label{eq:one-sided-row-transfer}
+\end{equation}
+Indeed, for every action $a$,
+$H_\rho(a)-E_\rho(a)\le\max_bH_\rho(b)+\max_b[-E_\rho(b)]$;
+taking the maximum and then the positive part proves the display.  Summing it
+over the finite row registry bounds the two players' exact target local
+regrets by $\widehat{\mathcal R}_T^w+\sum_\rho\psi(E_\rho)$.
+
+For completeness, fix a valid comparator for one player.  The perfect-recall
+policy-difference identity writes its weighted external regret as a sum over
+owned information sets of the comparator's own reach, which lies in $[0,1]$,
+times a comparator mixture of the cumulative centered counterfactual row.
+That mixture is at most the row maximum, and replacing that maximum by its
+positive part preserves the bound.  Applying this argument at
+$(x_t,y_t)$ for player zero and at $(x_{t+1},y_t)$ for player one, then taking
+the two comparator suprema, gives the native alternating local-to-external
+reduction.  Bilinearity of $u$ identifies its weighted comparator sums with
+the gap of the normalized weighted realization-plan averages.  The only
+unmatched term is
+\begin{align}
+C_T^w={}&\max_y\sum_t w_tu(x_{t+1}-x_t,y)
+-\sum_t w_tu(x_{t+1}-x_t,y_t). \label{eq:weighted-bridge}
+\end{align}
+Summation by parts gives
+\[
+\sum_t w_t(x_{t+1}-x_t)=w_Tx_{T+1}-w_1x_1
+-\sum_{t=2}^T(w_t-w_{t-1})x_t.
+\]
+The negative endpoint coefficient has magnitude $w_1$, while the increment
+coefficients have total $w_T-w_1$; together their magnitude is $w_T$.
+Because $W_T>0$ and the clock is nonnegative and nondecreasing, $w_T>0$.
+The negative terms divided by $w_T$ therefore form a convex combination
+$x^-$ of feasible realization plans, and, for every $y$,
+\[
+\sum_t w_tu(x_{t+1}-x_t,y)
+=w_T\{u(x_{T+1},y)-u(x^-,y)\}\le \Omega_0w_T.
+\]
+For the second term,
+$-u(x_{t+1}-x_t,y_t)=u(x_t,y_t)-u(x_{t+1},y_t)\le d_t$.
+Thus $C_T^w\le\Omega_0w_T+\sum_tw_td_t$.  Substituting the rowwise transfer
+into the native reduction and dividing the Nash gap by two proves the
+theorem. \hfill$\square$
+
+\paragraph{Why the correction is one-sided.}
+The learner accumulates $H_\rho$, whereas the target accumulates
+$H_\rho-E_\rho$.  For a two-action row with $H_\rho=(r,0)$, positive error
+$E_\rho=(e,0)$ with $e\ge0$ cannot increase the target maximum; negative
+error $E_\rho=(-e,0)$ can increase it by $e$.  Thus only cumulative
+underestimation can create additional positive target regret, exactly as
+measured by $\psi(E_\rho)$.  The four numerator terms in
+Equation~\ref{eq:weighted-target-debit} have separate roles: delivered learner
+regret, public target debit, the endpoint cost of the weighted alternating
+observer, and payoff decrease during player-zero updates.  A symmetric norm
+is valid but discards the first distinction.  The appendix gives
+component-resolved identities that compute or upper-bound the same debit from
+retained traces.
+
+\begin{proposition}[Complete coverage is a zero-debit action]
+\label{prop:zero-debit-action}
+For additive signed RM or RM+ with the uniform zero-positive-mass fallback,
+one event of complete, same-origin public
+coverage under the event-faithful simultaneous-update contract satisfies
+$\epsilon_{\rho,t}=0$ for every row and $d_t=0$.
+\end{proposition}
+
+Complete coverage has $B=N$, so its multiplier is one and
+$h_{\rho,t}=g_{\rho,t}$ at the same immutable origin; hence
+$\epsilon_{\rho,t}=0$.  For the payoff term, consider one updated row and put
+$p=\operatorname{RM}(z)$, $h=v-\langle p,v\rangle\one$,
+$x=[z]_+$, and $y=[z+h]_+$.  Coordinatewise monotonicity gives
+$(y_a-x_a)h_a\ge0$.  If $x$ has positive mass, it is a positive multiple of
+$p$; otherwise $x=0$.  In either case $x^Th=0$, hence $y^Th\ge0$.
+If $y$ has positive mass, normalization gives
+$\langle\operatorname{RM}(z+h),h\rangle\ge0$.  If $y$ has zero mass, the old
+mass must also be zero (a positive-mass centered state cannot be projected to
+zero), so both policies use the same uniform fallback and the inner product
+is zero.  Since $h$ is centered at $p$, this proves
+$\langle p^+-p,v\rangle\ge0$ in every mass branch.  RM+ has the same next
+policy because applying positive part once more is policy-idempotent.
+
+Let $\sigma$ be the immutable old profile and $\sigma^+$ the simultaneous
+update of all rows owned by player zero; the opponent rows agree.  Perfect
+recall gives the exact identity
+\[
+u(\sigma^+,y_t)-u(\sigma,y_t)
+=\sum_{I\in\mathcal I_0}\pi_0^{\sigma^+}(I)
+ \sum_a(\sigma^+(I,a)-\sigma(I,a))v^\sigma(I,a).
+\]
+It follows by telescoping terminal-path probabilities and grouping each
+changed decision occurrence by its information set; perfect recall makes the
+new-policy own reach $\pi_0^{\sigma^+}(I)$ independent of the representative
+history.  Every reach factor is nonnegative and every row inner product is
+nonnegative by the preceding argument.  Therefore
+$u(x_{t+1},y_t)\ge u(x_t,y_t)$, so $d_t=0$.
+
+\subsection{A debit-budgeted controller}
+
+Let $T_k=km$ be aligned checkpoints.  For the executed plan in block $k$,
+define its realized weighted charge
+\begin{equation}
+q_k=
+\sum_\rho\psi\!\left(\sum_{t=T_{k-1}+1}^{T_k}
+w_t\epsilon_{\rho,t}\right)
++\sum_{t=T_{k-1}+1}^{T_k}w_td_t.
+\label{eq:block-charge}
+\end{equation}
+A partial block has a history-measurable finite envelope $\bar q_k$ satisfying
+$0\le q_k\le\bar q_k$; its realized charge may be revealed after execution.
+The envelope enters the guarantee and need not be evaluated by the planner.
+Complete coverage has $q_k=0$ by
+Proposition~\ref{prop:zero-debit-action} and settles immediately.
+
+Let $A_{k-1}$ be the sum of settled partial charges and let $P_{k-1}$ contain
+the completed partial blocks whose charges remain unsettled.  Thus the
+mathematical realized account is
+$Q_{k-1}=A_{k-1}+\sum_{j\in P_{k-1}}q_j$ even when the controller has not yet
+observed every term.  Fix a predetermined nonnegative nondecreasing budget
+$b(T_k)$ and an outstanding-audit cap $\ell\ge1$.  DB-CFR may select a partial
+plan only if
+\begin{equation}
+A_{k-1}\le b(T_k),\qquad |P_{k-1}|<\ell;
+\label{eq:audited-admission}
+\end{equation}
+otherwise it executes complete coverage.  Within the solvent branch, any
+fixed completed-history rule may choose width and order.  Let
+$R_k^{(\ell)}$ be the sum of the $\ell$ largest envelopes among partial blocks
+executed through $k$, padding with zeros.
+
+\begin{theorem}[Causal exact-fallback guarantee]
+\label{thm:debit-controller}
+Assume event-faithful candidate executions; a designated complete-coverage
+candidate executable from every reachable block boundary; a finite
+history-measurable envelope for every selectable partial candidate; globally
+zero-initialized additive RM+; centered delivered rows bounded uniformly over
+the finite candidate registry; and a fixed nondecreasing output clock.  For
+every legal audit settlement order, DB-CFR is well defined,
+$Q_K\le b(T_K)+R_K^{(\ell)}$, and
+\begin{equation}
+\boxed{
+\operatorname{expl}(\bar x_{T_K}^w,\bar y_{T_K}^w)
+\le
+\frac{C_Rw_{T_K}\sqrt{T_K}+\Omega_0w_{T_K}+b(T_K)
++R_K^{(\ell)}}
+{2W_{T_K}}.}
+\label{eq:controller-bound}
+\end{equation}
+Under uniform weights, the same statement holds for additive signed RM.
+\end{theorem}
+
+\paragraph{Proof.}
+The executable complete candidate makes the transition total whenever the
+partial admission test fails; otherwise the selected partial candidate and
+its finite envelope determine the next event-faithful block.  Thus the stated
+controller is well defined under the theorem's premises.
+
+Suppose block $k$ is partial.  Equation~\ref{eq:audited-admission} gives
+$A_{k-1}\le b(T_k)$.  Its prior pending blocks together with the new block
+form a subset of the executed partial blocks of cardinality at most $\ell$.
+Since $q_j\le\bar q_j$ for each member,
+\[
+Q_k=A_{k-1}+\sum_{j\in P_k}q_j
+\le b(T_k)+\sum_{j\in P_k}\bar q_j
+\le b(T_k)+R_k^{(\ell)}.
+\]
+If block $k$ is complete, Proposition~\ref{prop:zero-debit-action} gives
+$q_k=0$ and the realized account is unchanged.  Monotonicity of $b$ and of
+the top-$\ell$ reserve closes this branch of the induction.  Moving a charge
+from pending to settled adds it to $A_k$ and removes the same amount from the
+pending sum, so arbitrary audit settlement leaves $Q_k$ invariant.
+
+For each row, $\psi(z)=\max_a[-z(a)]_+$ is subadditive.  Therefore
+\[
+\sum_\rho\psi\!\left(\sum_kE_{\rho,k}\right)
+\le\sum_k\sum_\rho\psi(E_{\rho,k}),
+\]
+and the nonnegative payoff-decrease charges add exactly.  Hence the two debit
+terms in Theorem~\ref{thm:weighted-target-debit} are at most $Q_K$.
+Finally, the coordinatewise RM+ clipping telescope gives, for each row with
+$\lVert h_{\rho,t}\rVert_2\le G_\rho$,
+$[\max_a\sum_t w_th_{\rho,t}(a)]_+
+\le w_{T_K}G_\rho\sqrt{T_K}$.  Summing the finite row registry and taking
+$C_R=\sum_\rho G_\rho$ yields the stated learner term.  Substitute
+$Q_K\le b(T_K)+R_K^{(\ell)}$ into
+Theorem~\ref{thm:weighted-target-debit}.  For uniform weights, the separate
+positive-part potential argument for unclipped signed RM supplies the same
+$C_R\sqrt{T_K}$ form. \hfill$\square$
+
+For a fixed block length, bounded row errors give a finite constant $C_B$ with
+$\bar q_k\le C_B\sum_{t=T_{k-1}+1}^{T_k}w_t$.  If $w_t=t^p$, $p\ge0$, and
+$b(T)=\kappa w_T\sqrt T$, then
+$R_K^{(\ell)}\le\ell C_Bmw_{T_K}$ and
+\[
+\operatorname{expl}\le\frac{p+1}{2}\left[
+\frac{C_R+\kappa}{\sqrt T}
++\frac{\Omega_0+\ell C_Bm}{T}\right].
+\]
+Thus fixed $\ell$ contributes only $O(T^{-1})$ and preserves the additive-RM+
+rate.  The one-block post-execution controller is the case $\ell=1$.  If a
+continuation-valid charge is instead available before selection, requiring
+$Q_{k-1}+q_k\le b(T_k)$ recovers the zero-overdraft prospective controller as
+a special implementation.
+
+\paragraph{Comparison with symmetric charging.}
+For every completed block, one-sided debit is no larger than charging
+$\sum_\rho\lVert E_\rho\rVert_\infty$ plus the same payoff term.  The
+inclusion is strict: the safe plan in the witness below has one-sided charge
+zero and symmetric charge $7/4$.  The appendix gives the formal dominance
+statement and proof.
+
+\subsection{Why counts cannot certify the decision}
+
+\begin{proposition}[Equal-metadata debit separation]
+\label{prop:metadata-separation}
+There is a finite two-player zero-sum perfect-recall game and two four-round
+singleton public-cut plans $S^+$ and $S^-$ with identical public counts, two
+complete coverage cycles, batch width, symbolic work and task graph, maximum
+prefix discrepancy $D_4=1$, and scalar strategy-path length $P_4=4$, but
+\begin{equation}
+q(S^+)=0,\qquad q(S^-)=\frac{11}{8}.
+\label{eq:charge-separation}
+\end{equation}
+Consequently, any charge based only on these shared summaries and sound for
+both plans assigns both at least $11/8$; at budget one it rejects $S^+$ even
+though its exact debit is zero.  Likewise, a pathwise strict-budget admission
+rule restricted to these summaries must reject both before execution.  To
+admit the zero-debit plan, a controller must obtain semantic information
+before execution or permit a bounded post-execution correction.
+\end{proposition}
+
+The witness starts zero-state signed RM on the two public conditional matrices
+\[
+M_1=\begin{pmatrix}3&3\\1&1\end{pmatrix},\qquad
+M_2=\begin{pmatrix}-1&0\\2&-1\end{pmatrix},
+\]
+and compares the balanced orders $S^+=(1,2,1,2)$ and
+$S^-=(2,1,2,1)$.  Exact replay gives
+\begin{center}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Plan & player-zero error & player-one error & payoff charge & $q$ \\
+\midrule
+$S^+$ & $(3/4,3/4)$ & $(0,1)$ & $0$ & $0$ \\
+$S^-$ & $(-3/8,5/8)$ & $(-3/4,3/4)$ & $1/4$ & $11/8$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+Both error rows of $S^+$ are coordinatewise nonnegative.  Plan $S^-$ instead
+incurs row underestimation $3/8+3/4$ and payoff decrease $1/4$.  The appendix
+gives the full recurrence and rational verification; its symmetric total
+charges are $7/4$ and $13/8$, respectively.  The result establishes a finite
+decision separation for the declared summary class.

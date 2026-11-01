@@ -1,0 +1,20 @@
+\section{Future Work}
+\label{app:future}
+
+GPU-CFR fixes the inner loop of tabular CFR and leaves the algorithm that calls it
+untouched, so the natural next steps are the solvers that call that loop many times.
+Real-time subgame re-solving \cite{burch2014solving,li2026real} runs a fresh solve
+under a per-decision budget on every turn; a captured graph turns each of those
+solves into one launch, and the budget then buys iterations instead of dispatch.
+Abstraction pipelines \cite{li2026effective,li2026abstraction} score candidate
+abstractions by solving each one, and computing tournament continuations in place of
+the ICM heuristic \cite{li2026icm} solves one subtree per stack configuration; both
+are loops of short, structurally identical solves that the compile-once design serves
+directly. On the evaluation side, the exact best-response and value-decomposition
+passes that variance-reduced estimators need \cite{li2026correlated,li2026av,li2026agents}
+share the compiled arrays of \cref{sec:compiled}. Finally, solver-guided language
+agents \cite{li2026pokerskill,wang2026solver} query equilibrium strategies during
+reasoning, and a single-GPU solver that answers those queries in milliseconds removes
+the latency that today limits such agents to precomputed charts. Extending the compiler
+to more than two players and to sampled (Monte Carlo) CFR variants, whose traversal is
+no longer static, is the main open design question.

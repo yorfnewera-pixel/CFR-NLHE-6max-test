@@ -1,0 +1,26 @@
+\BOOKMARK [1][-]{section.1}{Introduction}{}% 1
+\BOOKMARK [1][-]{section.2}{Related Work}{}% 2
+\BOOKMARK [1][-]{section.3}{Preliminaries}{}% 3
+\BOOKMARK [1][-]{section.4}{Compiling CFR onto Accelerators}{}% 4
+\BOOKMARK [2][-]{subsection.4.1}{Compiled game representation}{section.4}% 5
+\BOOKMARK [2][-]{subsection.4.2}{One iteration as a fixed dataflow}{section.4}% 6
+\BOOKMARK [2][-]{subsection.4.3}{CUDA-graph execution}{section.4}% 7
+\BOOKMARK [2][-]{subsection.4.4}{Layered verification}{section.4}% 8
+\BOOKMARK [1][-]{section.5}{The Compiled Iteration, Formally}{}% 9
+\BOOKMARK [1][-]{section.6}{Experimental Setup}{}% 10
+\BOOKMARK [1][-]{section.7}{Results}{}% 11
+\BOOKMARK [1][-]{section.8}{Conclusion}{}% 12
+\BOOKMARK [1][-]{section.9}{HUNL Subgame Construction}{}% 13
+\BOOKMARK [1][-]{section.10}{Benchmark Protocol and Environment}{}% 14
+\BOOKMARK [1][-]{section.11}{Correctness Test Inventory}{}% 15
+\BOOKMARK [1][-]{section.12}{Additional Results}{}% 16
+\BOOKMARK [2][-]{subsection.12.1}{Cross-implementation check of the update-rule study}{section.12}% 17
+\BOOKMARK [1][-]{section.13}{Poker Head-to-Heads and the Value-Agreement Certificate}{}% 18
+\BOOKMARK [1][-]{section.14}{Kernel-Level Profile and Alternative Execution Models}{}% 19
+\BOOKMARK [1][-]{section.15}{Compiler Passes and Memory Plan}{}% 20
+\BOOKMARK [1][-]{section.16}{Proofs}{}% 21
+\BOOKMARK [2][-]{subsection.16.1}{Proposition 1: folded chance is exact}{section.16}% 22
+\BOOKMARK [2][-]{subsection.16.2}{Proposition 2: the dual-lane update is exact}{section.16}% 23
+\BOOKMARK [2][-]{subsection.16.3}{Proposition 3: the depth schedule is shortest}{section.16}% 24
+\BOOKMARK [2][-]{subsection.16.4}{Proposition 4: the averaging horizon}{section.16}% 25
+\BOOKMARK [1][-]{section.17}{Future Work}{}% 26

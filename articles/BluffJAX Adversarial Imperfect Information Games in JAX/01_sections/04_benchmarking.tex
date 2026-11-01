@@ -1,0 +1,33 @@
+\section{Performance Benchmarking}
+\label{sec:benchmarking}
+
+\begin{figure}[htbp]
+    \centering
+        \centering
+        \includegraphics[width=\textwidth]{02_images/benchmarking/benchmark_speed_memory.pdf}
+        \caption{Speed and peak memory usage benchmarking for BluffJAX environments. All results are obtained on an RTX 6000 Ada GPU for 1000 random steps on all parallel environments. Each datapoint is a mean across 10 seeds (standard errors are not visible at this scale).}
+
+    \label{fig:speed_memory}
+\end{figure}
+
+
+In this section, we measure the speed and memory requirements of BluffJAX environments. Figure~\ref{fig:speed_memory} shows the simulation throughput and peak memory usage for increasing parallel environments for all BluffJAX games. For almost all games in BluffJAX, throughput scales log-linearly with the number of parallel environments. At 10,000 environments, we see that even the slowest game (Seven Card Stud) still generates on the order on $\sim$2e7 samples/s, evincing the benefits of parallelization in addressing data bottlenecks. Certain environments scale sub-log-linearly in throughput at high parallelization, which appears to be due to GPU memory constraints, as peak memory usage scales log-linearly as well - notably, Kemps demands the highest memory and throughput suffers after 1000 environments. As expected, environments with heavier game logic and larger array operations are subject to higher memory requirements and lower throughput at all levels of parallelization. In Figure~\ref{fig:speed_gpus}, we compare simulation throughput on both single and multi-GPU settings. We see that in the availability of high compute resources, BluffJAX achieves an average of 2.3x higher throughput.
+
+
+\begin{figure}[htbp]
+    \centering
+        \centering
+        \includegraphics[width=\textwidth]{02_images/benchmarking/benchmark_single_vs_multi_gpu.pdf}
+        \caption{Speed benchmarking for BluffJAX environments on single vs multi-GPU setups. All results are obtained with RTX 6000 Ada GPUs for 1000 random steps on 10,000 parallel environments. Each bar is a mean across 10 seeds (standard errors are not visible at this scale).}
+    \label{fig:speed_gpus}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+        \centering
+        \includegraphics[width=\textwidth]{02_images/benchmarking/benchmark_other_libraries.pdf}
+        \caption{Speed benchmarking comparison between BluffJAX and related libraries on single-GPU and multi-CPU-core setups. We specifically chose the 4 games with the most overlapping implementations in related libraries (although only BluffJAX implements all 4). All GPU results are obtained on an RTX 6000 Ada GPU for 1000 random steps on all parallel environments. All CPU results are obtained on a computational cluster with 64GB of RAM and an AMD Ryzen 9 16-Core processor using the Python multiprocessing library. Each datapoint is a mean across 10 seeds (standard errors are not visible at this scale).}
+    \label{fig:speed_other}
+\end{figure}
+
+Figure~\ref{fig:speed_other} compares the sample throughput rates of BluffJAX against those of similar GPU-based (PGX) and CPU-based (OpenSpiel, RLCard, PettingZoo) libraries.  The throughputs of BluffJAX are similar to those of PGX - this is likely due to the relative simplicity of the overlapping games (Kuhn/Leduc poker) which leaves little room for further game logic optimizations. Our similarity to PGX motivates our claim that our implementations are canonical and well-optimized, since they match the results of a well-established benchmark also designed for GPU acceleration. Note that our novel contribution relative to PGX is not in the throughput rates for these 2 simple games, but rather in our JAX implementations of non-overlapping games. BluffJAX outperforms all CPU-based libraries with a gap of at least an order of magnitude at 1000 environments and beyond. Notably, efficient vectorization enables GPU-based libraries to continue scaling linearly as parallelization increases, while scaling stagnates on CPUs. Note also that BluffJAX outperforms CPU-based libraries even with no parallelization due to efficient game tree logic and leveraging JIT compilation.

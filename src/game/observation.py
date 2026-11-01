@@ -1,0 +1,268 @@
+"""Public hand events and their player-specific replay."""
+
+from dataclasses import dataclass
+
+from src.game.types import (
+    Action,
+    ActionKind,
+    LegalActions,
+    Player,
+    Pot,
+    Street,
+    TableSeat,
+    pots_for,
+)
+
+SCHEMA_VERSION = 2
+RULES_PROFILE = "nlhe-cash-auto-muck-v1"
+
+
+@dataclass(frozen=True, slots=True)
+class HandStarted:
+    hand_id: str
+    player_ids: tuple[str, ...]
+    stacks: tuple[int, ...]
+    button: int
+    small_blind: int
+    big_blind: int
+    chip_unit: str
+    schema_version: int = SCHEMA_VERSION
+    rules_profile: str = RULES_PROFILE
+    seat_numbers: tuple[int, ...] = ()
+    table_seats: tuple[TableSeat, ...] = ()
+    capacity: int | None = None
+    session_profile: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BlindPosted:
+    seat: int
+    amount: int
+
+
+@dataclass(frozen=True, slots=True)
+class Decision:
+    seat: int
+    legal_actions: LegalActions
+
+
+@dataclass(frozen=True, slots=True)
+class ActionTaken:
+    seat: int
+    street: Street
+    action: Action
+    paid: int
+
+
+@dataclass(frozen=True, slots=True)
+class BoardDealt:
+    street: Street
+    cards: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CardsShown:
+    seat: int
+    cards: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CardsMucked:
+    seat: int
+
+
+@dataclass(frozen=True, slots=True)
+class HandFinished:
+    stacks: tuple[int, ...]
+    pots: tuple[Pot, ...]
+    showdown: bool
+
+
+PublicEvent = (
+    HandStarted
+    | BlindPosted
+    | Decision
+    | ActionTaken
+    | BoardDealt
+    | CardsShown
+    | CardsMucked
+    | HandFinished
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ObservedHand:
+    """A seat owner's record, suitable for carrying into a later hand."""
+
+    player_id: str
+    seat: int
+    hole_cards: tuple[str, ...]
+    events: tuple[PublicEvent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Observation:
+    hand_id: str
+    player_id: str
+    seat: int
+    hole_cards: tuple[str, ...]
+    board: tuple[str, ...]
+    street: Street
+    players: tuple[Player, ...]
+    button: int
+    small_blind: int
+    big_blind: int
+    chip_unit: str
+    actor: int | None
+    legal_actions: LegalActions
+    pots: tuple[Pot, ...]
+    history: tuple[PublicEvent, ...]
+    previous_hands: tuple[ObservedHand, ...]
+    finished: bool
+    seat_numbers: tuple[int, ...]
+    table_seats: tuple[TableSeat, ...]
+    capacity: int
+    session_profile: str | None
+
+    @property
+    def pot(self) -> int:
+        return sum(p.amount for p in self.pots)
+
+    def record(self) -> ObservedHand:
+        if not self.finished:
+            raise ValueError("Only completed hands can enter persistent history")
+        return ObservedHand(self.player_id, self.seat, self.hole_cards, self.history)
+
+
+def replay(
+    events: tuple[PublicEvent, ...],
+    seat: int,
+    hole_cards: tuple[str, ...],
+    previous_hands: tuple[ObservedHand, ...] = (),
+    *,
+    observer_id: str | None = None,
+) -> Observation:
+    if not events or not isinstance(events[0], HandStarted):
+        raise ValueError("A replay must start with HandStarted")
+    start = events[0]
+    if start.schema_version != SCHEMA_VERSION or start.rules_profile != RULES_PROFILE:
+        raise ValueError("Unsupported observation schema or rules profile")
+    spectator = type(seat) is int and seat == -1 and observer_id is not None
+    if spectator:
+        if (
+            observer_id in start.player_ids
+            or hole_cards
+            or not any(
+                p.player_id == observer_id and p.status != "sitting_out"
+                for p in start.table_seats
+            )
+        ):
+            raise ValueError(
+                "Unknown spectator or private cards supplied for a spectator"
+            )
+        identity = observer_id
+    else:
+        if type(seat) is not int or not 0 <= seat < len(start.stacks):
+            raise ValueError("Unknown observer seat")
+        identity = start.player_ids[seat]
+        if observer_id is not None and observer_id != identity:
+            raise ValueError("Observer identity does not match the seat")
+    if any(hand.player_id != identity for hand in previous_hands):
+        raise ValueError("Prior private history belongs to a different player")
+    # Reconstruct locally, then publish immutable players once at the boundary.
+    stacks = list(start.stacks)
+    street_bets = [0] * len(stacks)
+    contributed = [0] * len(stacks)
+    folded = [False] * len(stacks)
+    shown_cards = [()] * len(stacks)
+    mucked = [False] * len(stacks)
+    board = ()
+    street = Street.PREFLOP
+    actor = None
+    legal = LegalActions()
+    finished = False
+    for event in events[1:]:
+        if finished:
+            raise ValueError("Events cannot follow settlement")
+        if isinstance(event, (BlindPosted, ActionTaken)):
+            acting = event.seat
+            paid = event.amount if isinstance(event, BlindPosted) else event.paid
+            if not 0 <= paid <= stacks[acting]:
+                raise ValueError("Event overdraws a stack")
+            folded[acting] = folded[acting] or (
+                isinstance(event, ActionTaken) and event.action.kind == ActionKind.FOLD
+            )
+            stacks[acting] -= paid
+            street_bets[acting] += paid
+            contributed[acting] += paid
+            actor, legal = None, LegalActions()
+        elif isinstance(event, Decision):
+            actor, legal = event.seat, event.legal_actions
+        elif isinstance(event, BoardDealt):
+            street = event.street
+            board += event.cards
+            street_bets = [0] * len(stacks)
+            actor, legal = None, LegalActions()
+        elif isinstance(event, CardsShown):
+            if folded[event.seat] or mucked[event.seat]:
+                raise ValueError("Folded cards and mucked cards must stay private")
+            shown_cards[event.seat] = event.cards
+        elif isinstance(event, CardsMucked):
+            if folded[event.seat] or shown_cards[event.seat]:
+                raise ValueError("Only an unshown live hand can be mucked")
+            mucked[event.seat] = True
+        elif isinstance(event, HandFinished):
+            if (
+                len(event.stacks) != len(stacks)
+                or any(type(v) is not int or v < 0 for v in event.stacks)
+                or sum(event.stacks) != sum(start.stacks)
+            ):
+                raise ValueError("Settlement does not conserve chips")
+            stacks = list(event.stacks)
+            street_bets = [0] * len(stacks)
+            contributed = [0] * len(stacks)
+            if event.showdown:
+                street = Street.SHOWDOWN
+            actor, legal, finished = None, LegalActions(), True
+        else:
+            raise TypeError(f"Unexpected event: {type(event).__name__}")
+    players = tuple(
+        Player(
+            i,
+            identity,
+            start.stacks[i],
+            stacks[i],
+            street_bets[i],
+            contributed[i],
+            folded[i],
+            shown_cards[i],
+            mucked[i],
+        )
+        for i, identity in enumerate(start.player_ids)
+    )
+    return Observation(
+        start.hand_id,
+        identity,
+        seat,
+        tuple(hole_cards),
+        board,
+        street,
+        players,
+        start.button,
+        start.small_blind,
+        start.big_blind,
+        start.chip_unit,
+        actor,
+        legal if actor == seat else LegalActions(),
+        pots_for(players),
+        tuple(events),
+        tuple(previous_hands),
+        finished,
+        start.seat_numbers or tuple(range(len(players))),
+        start.table_seats
+        or tuple(
+            TableSeat(p.seat, p.player_id, p.starting_stack, "playing") for p in players
+        ),
+        start.capacity if start.capacity is not None else len(players),
+        start.session_profile,
+    )

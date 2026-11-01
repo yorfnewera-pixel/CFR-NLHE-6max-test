@@ -1,0 +1,94 @@
+Вот три основных ресурса для реализации Potential-Aware EMD в HU Texas Hold'em.
+
+## 1. Оригинальная научная статья — главный источник
+
+Ganzfried & Sandholm (2014)
+
+Potential-Aware Imperfect-Recall Abstraction with Earth Mover's Distance in Imperfect-Information Games.
+
+- [PDF — Carnegie Mellon University](https://www.cs.cmu.edu/~sandholm/potential-aware_imperfect-recall.aaai14.pdf?utm_source=chatgpt.com)
+- [Публикация AAAI](https://ojs.aaai.org/index.php/AAAI/article/view/8816?utm_source=chatgpt.com)
+- [DOI: 10.1609/aaai.v28i1.8816](https://doi.org/10.1609/aaai.v28i1.8816?utm_source=chatgpt.com)
+
+Что изучать: описание алгоритма, построение распределений будущей силы рук, EMD и процедуру кластеризации. Это первоисточник, по которому нужно проверять остальные реализации.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.cs.cmu.edu\&sz=32)
+
+CMU School of Computer Science+1
+
+
+
+## 2. Реализация на Python — наиболее удобная для знакомства
+
+[Download Free GitHub Logo PNG and SVG Icons](https://images.openai.com/static-rsc-4/8nknb6NuCMNhuQpeaE5AO-_eYwNXh1OHakGI0r_IDIZepaBhi_UZGvBXivBYBguyokple8rmnfaDPDkxmbOu8bYyMnevYNVvD_YSYfKqt3e55ODyi8NKVs5dM4yXbIpjsZmcMAWWWmEIfqDpr_UGeNUijwlN0JOhZbQKaCakRM8?purpose=inline)
+
+Deepstack-for-Bucket
+
+[GitHub — Jingho](https://github.com/Jingho/Deepstack-for-Bucket?utm_source=chatgpt.com)
+
+Рекомендую начать здесь
+
+Неофициальная реализация статьи с более структурированной архитектурой:
+
+- `equity_calculator.py` — вычисление equity.
+- `generator.py` — генерация данных.
+- `distance.py` — матрица расстояний.
+- `clusterer.py` — кластеризация.
+- `mapper.py` — соответствие рук бакетам.
+
+Есть тесты, конфигурация и документация.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+
+GitHub
+
+
+
+## 3. Более старая реализация — полезна для изучения оригинальной логики
+
+[Download Free GitHub Logo PNG and SVG Icons](https://images.openai.com/static-rsc-4/8nknb6NuCMNhuQpeaE5AO-_eYwNXh1OHakGI0r_IDIZepaBhi_UZGvBXivBYBguyokple8rmnfaDPDkxmbOu8bYyMnevYNVvD_YSYfKqt3e55ODyi8NKVs5dM4yXbIpjsZmcMAWWWmEIfqDpr_UGeNUijwlN0JOhZbQKaCakRM8?purpose=inline)
+
+Potential-Aware-Abstraction-In-Texas-Hold-em-Poker
+
+[GitHub — ChengTsang](https://github.com/ChengTsang/Potential-Aware-Abstraction-In-Texas-Hold-em-Poker?utm_source=chatgpt.com)
+
+Особенно интересны:
+
+| Файл                       | Назначение                |
+| -------------------------- | ------------------------- |
+| `EMD_org.py`               | EMD                       |
+| `generate_data_5public.py` | Генерация риверных данных |
+| `clustering_5public.py`    | Кластеризация ривера      |
+| `generate_data_4public.py` | Генерация тёрновых данных |
+| `clustering_4public.py`    | Кластеризация тёрна       |
+| `generate_data_3public.py` | Генерация флоповых данных |
+
+Внимание: эта реализация рассчитана на колоду из 12 карт. Авторы прямо предупреждают, что переход на 52 карты потребует существенных вычислительных ресурсов и изменений.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+
+GitHub
+
+
+
+## Какой порядок реализации я рекомендую
+
+1. Воспроизвести оригинальный алгоритм
+
+   Разобраться с генерацией распределений и EMD на сокращённой колоде.
+2. Перенести на 52 карты
+
+   Реализовать эффективное вычисление equity, кэширование и параллельную генерацию.
+3. Построить HU-абстракцию
+
+   Последовательно построить River → Turn → Flop.
+4. Подключить к CFR
+
+   Использовать готовые таблицы отображения карт в бакеты.
+5. Сравнить с K50 автора CFR-NLHE-6max
+
+   Одинаковый бюджет обучения и количество бакетов.
+
+Мой совет: не начинай с переписывания старого репозитория на 52 карты. Сначала изучи `Deepstack-for-Bucket`, сверяй его математику с оригинальной статьёй, а затем адаптируй под свою архитектуру CFR.
+
+Так будет меньше риска перенести в свой решатель ошибку из чужой реализации.

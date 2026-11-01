@@ -1,0 +1,221 @@
+\section{Experiments}
+\label{sec:experiments}
+
+The experiments address four questions: whether width and order create a
+material target-validity problem, whether target debit yields a nontrivial
+control frontier, whether a causal completed-history rule transfers to unseen
+public orders, and what its exact audit costs.  They additionally compare
+one-sided debit with symmetric error charging.  No controller decision
+observes exploitability.
+
+\paragraph{Domains and measures.}
+The primary evidence uses released full-range Libratus Turn Subgames 2 and 1
+\citep{brown2017libratus}.  Subgame 2 contains 1.86M information sets, 4.78M
+actions, 15 public cuts, and 48 river outcomes per cut; Subgame 1 has
+$5.7\times$ as many information sets.  Exact exploitability is reported in
+milli-big-blinds per game.  The independent domain is ten-card public Leduc,
+with a separate Python implementation and ten semantic public-card
+components.  Its main quality measure is NashConv, twice
+Equation~\ref{eq:gap-definition}.  HUNL comparisons use selected outcomes,
+learner CPU under the registered timing protocol, and exact quality.  The
+controller comparison reports selected public components in the installed
+learner recurrence; post-block audit work is accounted separately.
+
+\paragraph{Non-poker transfer domains.}
+Three root-chance-cut games transfer the debit interface out of poker: four-card
+imperfect-information Goofspiel (prize-order cut, 24 labels, 680 information
+sets), one-die Liar's Dice (joint-deal cut, 36 labels, 24{,}576 information
+sets), and 2$\times$2 random-placement Battleship (joint-placement cut, 16
+labels, 5{,}588 information sets).  Every terminal belongs to exactly one cut
+outcome, so utilities decompose exactly over labels; the campaigns share one
+parameterized engine and reproduce the public-Leduc register shapes
+(pre-registered seeds, widths dividing the label count, 1e-9 certificate
+tolerances, timing inadmissible).  The three-domain matrix is reported by
+campaign family only after every domain in that family terminates; null,
+negative, and invalid outcomes remain visible under the dual-paper fairness
+protocol.  Because non-benign float values trigger the
+zero-regret regret-matching discontinuity, the full-coverage dense-reference
+parity is pre-registered per domain (learner-state fingerprints at 9 decimals
+plus quality agreement, or a documented diagnostic mode); the certificate
+identities and full-coverage zero-debit gates are unchanged.
+
+The census and development families are now closed
+(Table~\ref{tab:nonpoker-debit}).  Every census is valid and finds both a
+nontrivial work--debit frontier and state-dependent partial debit, but no
+semantic feature improves over the constant width ranking: the latter is a
+three-domain negative result.  Development promotes no controller in
+Goofspiel or Battleship.  In Liar's Dice, $\kappa=4$ is the sole promoted
+value, winning on three of four development seeds with median matched-work
+improvement $0.00626$; thus only Liar's Dice was eligible for a prospective
+controller register.
+The original 64-epoch target-transfer run proved unsuitable for local CPU
+execution and was stopped before any width-2 path completed.  A documented
+compute amendment, chosen from Liar's Dice runtime metadata without reading
+the six partial Liar's Dice values, replaces it uniformly in all three domains
+by four new seeds and coverage epochs $\{1,2,4,8\}$.  The earlier Goofspiel V1
+summary had already been inspected, so Goofspiel also receives a new seed
+bank.  A restart-semantics audit after the V2 Goofspiel summary then found that
+the V2 machine-readable prediction seal retained obsolete V1 absolute counts
+despite the registered proportional gates.  V2 is therefore excluded in full.
+V3 fixes only that serialization,
+uses a shared gate-count function plus fresh seeds, and adds authenticated
+per-invocation resume.  All corrected cohorts are valid
+(Table~\ref{tab:nonpoker-target}).  Persistent order wins debit on $8/8$
+pairs in every domain, but quality on only $1/8$, $4/8$, and $5/8$ pairs in
+Goofspiel, Liar's Dice, and Battleship.  Hence every domain supports the
+transfer certificates while failing the registered joint ordering
+consequence.  The eligible Liar's Dice prospective register required three
+fail-closed compute revisions: an oversized V1 runtime pilot, a V2
+adjudicator-name error with no terminal result, and a valid one-block V3 pilot
+whose horizon could not exercise the development-observed width switch.  The
+final V4 register uses the minimum three-block dynamic horizon and six fresh
+seeds.  It is valid, pools widths 6 and 36, and has positive median
+matched-work improvement $0.01054$, but wins only $4/6$ seeds against the
+best fixed control, below the frozen $5/6$ gate.  Prospective transfer is
+therefore not established.
+
+\begin{table}[H]
+  \caption{Complete non-poker causal-debit census and controller-development
+  cohorts.  V, F, and S denote validity, a nontrivial frontier, and
+  state-dependent partial debit; R denotes semantic ranking improvement.
+  Failed gates are retained rather than filtered.}
+  \label{tab:nonpoker-debit}
+  \centering
+  \footnotesize
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}lccccc@{}}
+    \toprule
+    Domain & V & F & S & R & Development decision \\
+    \midrule
+    Goofspiel-4 & pass & pass & pass & fail & no $\kappa$ promoted \\
+    Liar's Dice & pass & pass & pass & fail & $\kappa=4$; $3/4$ wins \\
+    Battleship & pass & pass & pass & fail & no $\kappa$ promoted \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[H]
+  \caption{Complete corrected non-poker target-transfer and eligible
+  prospective cohorts.  Q/D are persistent-order wins for quality/debit out
+  of eight paired target paths.  Failed gates are retained.}
+  \label{tab:nonpoker-target}
+  \centering
+  \footnotesize
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}lccc@{}}
+    \toprule
+    Domain & Validity & Target Q/D & Prospective decision \\
+    \midrule
+    Goofspiel-4 & pass & $1/8$ / $8/8$ & unopened (development fail) \\
+    Liar's Dice & pass & $4/8$ / $8/8$ & fail: $4/6$ wins; median $+0.01054$ \\
+    Battleship & pass & $5/8$ / $8/8$ & unopened (development fail) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\input{figures/db_cfr_evidence}
+\caption{Existing evidence for the width-control problem and DB-CFR.
+\textbf{(a)} Partial HUNL widths lead at 32 exact-equivalent rounds, but
+complete coverage overtakes all of them by 64 rounds.  \textbf{(b)} Widths 2,
+5, and 10 form a public-Leduc work--debit frontier; points are medians and
+vertical segments are ranges.  \textbf{(c)} The prespecified lagged rule improves on
+the best no-greater-recurrence-work fixed width on all ten unseen orders.  Gain
+is fixed-width NashConv minus DB-CFR NashConv; the dashed line is the median.}
+\label{fig:db-cfr-evidence}
+\end{figure}
+
+\subsection{Width and order define a real learning frontier}
+
+At 3,072 selected HUNL outcomes per lane, IID singleton sampling reaches
+5,042 mbb/g, fresh reshuffling each epoch reaches 2,278 mbb/g, and one
+persistent order reaches 1,964 mbb/g.  The persistent improvement over
+reshuffling is 314 mbb/g (95\% interval $[282,349]$), although both schedules
+cover every outcome once per epoch.  A read-only equal-coverage averaging
+control retains 84.7\% of the IID--reshuffle contrast, locating the principal
+effect in the delivered feedback path.
+
+With additive RM+, all 21 width--horizon comparisons through 32 exact-
+equivalent rounds favor partial coverage on each HUNL input, for 42/42 positive
+comparisons.  On Subgame 2 at 1,536 selected outcomes, widths 16 and 24 improve
+on complete coverage by 23.3\% and 23.8\%.  A geometric depth ladder then
+finds that complete coverage overtakes every partial width between 32 and 64
+rounds.  At 512 rounds, complete coverage reaches 31.1 mbb/g, compared with
+273, 233, and 171 mbb/g for widths 8, 16, and 24.  The changed ranking across
+depth rules out treating one width as a universal estimator setting
+(Figure~\ref{fig:db-cfr-evidence}a).
+
+At three exact HUNL quality targets, target-valid IID sampling requires
+$1.92$--$2.01\times$ the learner CPU of persistent width 16; exact-to-
+persistent ratios are $1.004$--$1.055$.  The appendix reports confidence
+intervals, complete grids, the CPU contract, and retained negative controls.
+
+\subsection{The debit census exposes three feasible regimes}
+
+The causal public-Leduc census follows natural alternating signed-RM paths.
+Four development orders and three reference widths produce 48 checkpoint
+states.  From each state, widths 2, 5, and 10 are replayed for one common
+ten-round block, giving 144 paired candidate records.  All centered-row,
+nonmutation, deterministic-replay, and dense-parity checks pass.
+
+\begin{table}[h]
+\caption{Public-Leduc debit census and causal DB-CFR result.  Work counts
+selected public components in the installed recurrence.}
+\label{tab:debit-controller}
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Candidate width & Block work & Debit range & Median debit \\
+\midrule
+2 & 40 & $9.96$--$53.44$ & $22.15$ \\
+5 & 100 & $2.73$--$12.33$ & $7.18$ \\
+10 & 200 & $0$ & $0$ \\
+\midrule
+\multicolumn{4}{@{}l@{}}{Lagged causal DB-CFR: 10/10 unseen-order wins;
+median NashConv gain $0.0456$; median work 720.}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All three widths appear on the exact work--debit frontier
+(Table~\ref{tab:debit-controller}).  Width 5 has lower debit than width 2 in
+all 48 contexts, while debit magnitude changes markedly with learner state.
+Thus the controller decision is not which partial width has smaller debit; it
+is which frontier point fits the remaining cumulative budget.
+
+\paragraph{Symmetric-charge comparison.}
+The symmetric comparator is strictly larger on all 96 partial records (median
+ratio $2.325\times$).  Under the ten-round budget induced by $\kappa=12$,
+one-sided debit admits 84 partial offers versus 56; both charges remain zero
+for complete coverage.
+
+\subsection{A causal controller transfers to unseen orders}
+
+The causal study fixes $b(T)=12\sqrt T$ and twelve ten-round blocks.  On four
+development orders, five completed-history policies produce a work--quality
+Pareto set containing fixed width 5, the lagged rule from
+Section~\ref{sec:method}, and exact coverage.  The lagged rule is prespecified
+from development; it changes width while using substantially less
+recurrence work than fixed width 5.  No policy evaluates an unselected
+continuation.
+
+On ten disjoint held-out public orders, lagged DB-CFR beats the lowest-NashConv
+fixed width using no more installed component work on all ten pairs
+(two-sided exact sign test $p=0.00195$; Figure~\ref{fig:db-cfr-evidence}c).
+The paired median gain is 0.0456.  The
+controller uses widths 2, 5, and 10, produces ten distinct schedules, and uses
+660--780 components (median 720).  All finite-overdraft, exact-fallback,
+matched-work, and fingerprint checks pass.  Appendix
+Table~\ref{tab:app-causal-controller} reports the complete register.
+
+The result changes the learner path without future candidate replay.  It
+isolates debit-guided recurrence work; the full-target post-block audit and a
+prospective exact-lookahead comparator are reported separately in the appendix.
+
+\paragraph{Audit resources.}
+Across nine preregistered HUNL width--seed cells, the exact target-debit core's
+incremental process CPU equals a median 1.56 and maximum 3.43 matched
+learner-only runs, meeting the registered periodic-audit thresholds.  Omitted-
+component quotient traversals account for 88.2\% of that cost.

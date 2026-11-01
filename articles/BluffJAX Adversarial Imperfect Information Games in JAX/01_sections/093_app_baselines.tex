@@ -1,0 +1,112 @@
+\section{Details on Experiments}\label{supp:baselines}
+In this section, we detail the hyperparameters and training settings for the experiments in the main paper.
+
+\subsection{CFR and Deep CFR}
+Our results for CFR were run with 100 iterations over the whole game tree for both games. Our results for Deep CFR were run with 50 iterations and 100 traversals per iteration. The policy network and advantage networks used in both cases are fully connected MLPs with 2 hidden layers, 64 hidden units/layer, ReLu activations, and LayerNorm after each hidden layer. The networks were trained with 200 advantage training steps and a memory capacity of 100,000. All networks were trained with the Adam~\citep{kingma2014adam} optimizer. We ran 10 seeds per game for Deep CFR.
+
+\subsection{PPO, PQN, PPO-NFSP, PQN NFSP}
+We benchmarked PPO and PPO-NFSP in all environments using the following settings for the value network and policy networks of PPO: fully connected MLPs with 2 hidden layers, 128 hidden units/layer, ReLu activations. Table~\ref{tab:ppo_hyperparams} details the hyperparameters and training settings for the PPO actor and value networks.
+
+\begin{table}[htbp]
+    \caption{PPO hyperparameters.}
+    \begin{center}
+        \begin{tabular}{lc}
+        \hline
+            \multicolumn{1}{c}{Hyperparameter} & \multicolumn{1}{c}{Value} \\ \hline
+            num\_timesteps & $1e7$ \\
+            num\_envs & 1024 \\
+            num\_steps\_per\_env\_per\_update & 64 \\
+            num\_epochs & 4 \\
+            num\_minibatches & 4 \\
+            lr & $3\times10^{-5}$ \\
+            anneal\_lr & True \\
+            gamma & 0.99 \\
+            gae\_lambda & 0.95 \\
+            clip\_eps & 0.2 \\
+            vf\_clip & 0.2 \\
+            ent\_coef & 0.0 \\
+            vf\_coef & 1.0 \\
+            max\_grad\_norm & 0.5 \\
+            optimizer & adam \\
+            \hline
+        \end{tabular}
+    \end{center}
+    \label{tab:ppo_hyperparams}
+\end{table}
+
+We also benchmarked PQN and PQN-NFSP in all environments. Here are the settings for the PQN networks in each case: fully connected MLPs with 2 hidden layers, 128 hidden units/layer, LayerNorm after each layer, ReLu activations. Table~\ref{tab:pqn_hyperparams} details the hyperparameters and training settings for the PQN Q-network.
+
+\begin{table}[htbp]
+    \caption{PQN hyperparameters.}
+    \begin{center}
+        \begin{tabular}{lc}
+        \hline
+            \multicolumn{1}{c}{Hyperparameter} & \multicolumn{1}{c}{Value} \\ \hline
+            num\_timesteps & $1e7$ \\
+            num\_envs & 1024 \\
+            num\_steps\_per\_env\_per\_update & 64 \\
+            num\_epochs & 2 \\
+            num\_minibatches & 2 \\
+            lr & $2.5\times10^{-4}$ \\
+            start\_e & 1.0 \\
+            end\_e & 0.05 \\
+            exploration\_fraction & 0.2 \\
+            q\_lambda & 0.9 \\
+            max\_grad\_norm & 0.5 \\
+            gamma & 0.99 \\
+            fc\_dim\_size & 128 \\
+            anticipatory\_eta & 0.1 \\
+            sl\_reservoir\_capacity & 100000 \\
+            sl\_batch\_size & 256 \\
+            sl\_num\_steps\_per\_update & 2 \\
+            sl\_lr & $3\times10^{-4}$ \\
+            optimizer & adam \\
+            \hline
+        \end{tabular}
+    \end{center}
+    \label{tab:pqn_hyperparams}
+\end{table}
+
+In experiments with PPO-NFSP and PQN-NFSP, we use the settings above for the best response PPO/PQN agents. For the NFSP anticipatory (supervised) networks, we use the following settings: 2 hidden layers, 128 hidden units/layer, ReLu activations. Table~\ref{tab:nfsp_hyperparams} details the hyperparameters for the supervised network.
+
+\begin{table}[htbp]
+    \caption{NFSP Anticipatory Network hyperparameters.}
+    \begin{center}
+        \begin{tabular}{lc}
+        \hline
+            \multicolumn{1}{c}{Hyperparameter} & \multicolumn{1}{c}{Value} \\ \hline
+            anticipatory\_eta & 0.1 \\
+            sl\_reservoir\_capacity & 100000 \\
+            sl\_batch\_size & 256 \\
+            sl\_num\_steps\_per\_update & 2 \\
+            sl\_lr & $3\times10^{-4}$ \\
+            optimizer & adam \\
+            \hline
+        \end{tabular}
+    \end{center}
+    \label{tab:nfsp_hyperparams}
+\end{table}
+
+\subsection{ReBeL}
+Our experiments with ReBeL had the following settings for the value network in each case: fully connected MLP with 2 hidden layers, 128 hidden units/layer, ReLu activations. Table~\ref{tab:rebel_hyperparams} details the hyperparameters and training settings for ReBeL.
+
+\begin{table}[htbp]
+    \caption{ReBeL hyperparameters.}
+    \begin{center}
+        \begin{tabular}{lc}
+        \hline
+            \multicolumn{1}{c}{Hyperparameter} & \multicolumn{1}{c}{Value} \\ \hline
+            num\_update\_steps & 1000 \\
+            num\_subgames\_per\_update & 2 \\
+            cfr\_iterations & 2 \\
+            max\_depth & 4 \\
+            random\_action\_prob & 0.2 \\
+            value\_lr & $3\times10^{-4}$ \\
+            replay\_capacity & 10000 \\
+            batch\_size & 256 \\
+            num\_value\_train\_steps & 4 \\
+            \hline
+        \end{tabular}
+    \end{center}
+    \label{tab:rebel_hyperparams}
+\end{table}

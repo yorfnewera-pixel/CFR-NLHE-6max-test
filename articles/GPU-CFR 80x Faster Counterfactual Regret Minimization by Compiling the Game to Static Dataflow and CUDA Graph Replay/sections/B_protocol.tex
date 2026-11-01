@@ -1,0 +1,124 @@
+\section{Benchmark Protocol and Environment}
+\label{app:protocol}
+
+\paragraph{Hardware and software.}
+All measurements: one NVIDIA A100 80GB PCIe (dedicated, otherwise idle; driver
+530.30) in a dual-socket host with two Intel Xeon Gold 6348 processors (Ice Lake,
+28 cores and 56 threads each at 2.6\,GHz base, 112 logical CPUs, two NUMA nodes),
+256\,GB of DDR4-3200 ECC memory on eight channels per socket, Linux 5.4 with the
+\texttt{ondemand} frequency governor, GCC 9.4, PyTorch 1.13.1+cu117, CUDA 11.7,
+Python 3.9.16. The three stages of the performance ladder (\cref{fig:ladder}) are
+measured in one process under this stack: the pre-optimization iteration body is
+preserved verbatim in the artifact (\texttt{opcount\_legacy.py}) and timed with the
+same CUDA-event protocol as the compiled stages, and the same three stages re-measured
+under PyTorch 2.5.1+cu121 are in \cref{tab:altexec}. CPU rows use 8
+threads (\texttt{OMP\_NUM\_THREADS} and \texttt{MKL\_NUM\_THREADS} both set to~8)
+pinned via
+\texttt{taskset} to 8 whole physical cores on one NUMA node, with those cores' SMT
+siblings excluded from the set (siblings share one core's execution units, so
+counting them would overstate the arm's parallelism). LiteEFG 0.1.5 (single-threaded C++); OpenSpiel
+Python CFR with exact best response. The multi-threaded CPU execution that the GPU
+path is compared against is therefore this eight-thread compiled arm together with
+the C++ library; \cref{fig:cpuscaling} reports how the compiled arm scales from one
+to 28 threads.
+
+\paragraph{Timing rules.}
+GPU steady-state: CUDA events around a 1{,}000-iteration batch after 50
+state-changing warmup iterations; the reported ms/iteration is the cost of iterations
+51--1050. Training-call time (the ``Train'' columns of
+\cref{tab:riverthreeway,tab:sg4threeway}): wall-clock of one training call with the
+stated number of solver updates on a freshly constructed solver, so including the
+call's three eager warmup iterations and graph capture,
+but excluding game specification, compilation and solver construction (reported
+separately in \cref{tab:overhead,tab:lifecycle}); a device
+synchronize closes the training call before the evaluation bracket opens, so
+asynchronous graph replays are never booked as evaluation time. The
+warmup count differs because steady-state timing deliberately fills the captured
+graph before measurement, whereas a training call measures the production setup
+path. CPU and baseline
+rows use \texttt{perf\_\allowbreak counter} wall-clock over the training call. Exploitability evaluation
+time is excluded from all training times. The host is shared, so every reported number
+comes from one serial gated campaign under the same protocol: 2{,}293 measurement cells
+over 24.2 hours in two queues, a GPU queue pinned to one A100 and physical cores 48--55
+(1{,}351 cells, 10.1 hours) and a CPU queue pinned to physical cores 0--7 (942 cells,
+14.1 hours), covering the timing matrix, the ablations, the external baselines, the
+convergence grids and the anytime curves.
+Each cell is an independent process, with the 1-minute load average sampled before and
+after it. A cell was not started above a load of 50 on the 112-core host; the realized
+maximum was 7.4 in the GPU queue and 40.9 in the CPU queue, the latter from other
+tenants on cores outside both pinned sets. Only two OpenSpiel cells ran above a load of
+20, and the thread-scaling cells of \cref{fig:cpuscaling} additionally waited for a
+load below 10. No cell was skipped or retried on that account.
+Every speedup range and median quoted in the text is computed from the unrounded
+cell medians by the table generators and enters the text as a generated macro, so
+ratios of the rounded entries in \cref{tab:matrix} can differ from the quoted ones
+in the last digit. Medians are over 20 repetitions for
+GPU-CFR and the Ours CPU arm and 10 for the
+vanilla-CFR control arm (regret matching without the $^{+}$ floor, linear averaging
+retained) and for the baselines. Every archived result records the load at measurement time.
+
+\paragraph{Operation and memory counters.}
+The Aten operation counts of \cref{tab:suite} are collected with a
+\texttt{TorchDispatchMode} interceptor, so they are load-immune and exactly
+reproducible. \cref{tab:memory} reports peak GPU memory in binary megabytes from
+the two \texttt{torch.cuda} counters, \texttt{max\_memory\_allocated} and
+\texttt{max\_memory\_reserved}.
+
+\paragraph{Solve protocol.}
+CFR$^{+}$ (regret matching$^{+}$, linear averaging), simultaneous updates, float32,
+seed 0. OpenSpiel runs 200 iterations of its vanilla CFR. Its three solvers
+(CFR, CFR$^{+}$, DCFR) all fix \texttt{alternating\_updates=True}, so none of its
+presets matches GPU-CFR's update order and we pick the one whose rule matches the
+vanilla arm. Exploitability =
+NashConv$/2$ for every backend. The update-rule study of \cref{tab:convergence} departs
+from this protocol by design, sweeping four rules under both orders on the CPU at
+$T{=}1{,}000$ in float32. It runs on the CPU because that device reproduces a solve
+bitwise while the GPU does not, which is a requirement for ordering rules that sit close
+together; \cref{app:correctness} quantifies the GPU spread. Every wall-clock number in
+the paper, including the CPU arm of \cref{tab:matrix}, is unaffected. Quality comparisons across backend defaults use within-game wall-clock curves
+(\cref{sec:quality}).
+
+\begin{table*}[!htb]
+\centering
+\caption{Semantics of every timed arm. Order: simultaneous (S) or alternating (A,
+one half-update per player per iteration). Averaging: uniform (U) or linear (L)
+iterate weights. Every arm starts from uniform strategies and zero regrets; the
+LiteEFG preset arm appears in \cref{app:extra}.}
+\label{tab:semantics}
+{
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llccll}
+\toprule
+Arm & Rule & Order & Avg. & Precision & Execution \\
+\midrule
+GPU-CFR graph & CFR$^{+}$ & S & L & float32 & graph replay \\
+GPU-CFR eager & CFR$^{+}$ & S & L & float32 & eager CUDA \\
+GPU-CFR vanilla & CFR & S & L & float32 & graph replay \\
+Ours CPU & CFR$^{+}$ & S & L & float32 & eager, 8 threads \\
+Kim (2026) & CFR$^{+}$ & S & L & float32 & CuPy, eager \\
+LiteEFG & CFR & S & U & float64 & C++, 1 thread \\
+LiteEFG preset & CFR$^{+}$ & A & L & float64 & C++, 1 thread \\
+OpenSpiel & CFR & A & U & float64 & Python, 200 it. \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+\paragraph{Conversion validation.}
+Public games are instantiated once through OpenSpiel and converted per backend.
+Conversions are checked structurally (node, edge, and information-set counts match
+across backends) and behaviorally: on the small games, exploitability curves and
+their limiting values are consistent across backends, and Dark Hex 2$\times$2
+reproduces its known first-player-win value ($v_0 = +1$) with exploitability
+$\to 0$ under every backend.
+
+\paragraph{Reproduction.}
+Result files are JSONL with full environment echo (device, dtype, versions,
+node/infoset counts, execution mode, load average). All tables and figures regenerate
+from these files with the committed scripts. Campaign orchestration uses a separate
+gated driver; the figure driver consumes only archived records and never launches a
+solver. The 8-thread CPU arm was re-measured after the main campaign on whole physical
+cores; both sets of records are archived, and the loader reads
+the whole-core set. The artifact is provided as supplementary material: the solver,
+the benchmark drivers, the archived JSONL records, the figure and table generators,
+and the test suite, with a README that lists a smoke run of the test suite and the
+full campaign commands together with the tolerances each check applies.

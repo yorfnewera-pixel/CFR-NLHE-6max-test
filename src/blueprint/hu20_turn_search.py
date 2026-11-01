@@ -1,0 +1,499 @@
+"""Public-state nested HU20 search, shared by play and hypothetical LBR queries."""
+
+from collections import Counter, OrderedDict
+from dataclasses import asdict, dataclass
+from itertools import combinations
+from math import exp, fsum, isfinite, log
+from random import Random
+from time import monotonic
+
+import numpy as np
+
+from src.arena.schedule import digest
+from src.blueprint.hu20_river import public_identity
+from src.blueprint.abstraction import information_key
+from src.blueprint.hu20_turn_solver import PolicyMatrix, SolveFailure
+from src.blueprint.hu20_turn_tree import (
+    VERSION, betting_line, compile_tree, line_key, round_root, solver_action,
+)
+from src.blueprint.search import DECK
+from src.game.observation import ActionTaken, replay
+from src.game.types import ActionKind, Street
+
+
+@dataclass(frozen=True, slots=True)
+class TurnSearchConfig:
+    iterations: int = 100
+    threads: int = 2
+    compress: bool = True
+    menu: str = "native"
+    opponent_likelihood_floor: float = .01
+    decision_seconds: float | None = 30
+    memory_budget_bytes: int = 5 * 1024**3
+    max_public_nodes: int = 300_000
+    cache_entries: int = 32
+
+    def __post_init__(self):
+        for name in ("iterations", "threads", "memory_budget_bytes", "max_public_nodes", "cache_entries"):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f"Invalid {name}")
+        if (type(self.compress) is not bool or self.menu not in ("native", "cap2")
+                or self.opponent_likelihood_floor not in (0, .01)
+                or (self.decision_seconds is not None and (not isfinite(self.decision_seconds)
+                    or not (0 < self.decision_seconds <= 30 or self.decision_seconds == 120)))
+                or self.memory_budget_bytes > 10 * 1024**3):
+            raise ValueError("Invalid search settings")
+        if self.decision_seconds is None and (self.iterations != 50 or self.threads != 6
+                or self.compress or self.menu != "native" or self.opponent_likelihood_floor != 0):
+            raise ValueError("Fixed-work protocol requires native, six threads, uncompressed, 50 iterations, epsilon zero")
+
+
+@dataclass(frozen=True)
+class PublicSolution:
+    root: tuple
+    request: dict
+    profiles: dict
+    ranges: dict
+    coverage: dict
+
+    def matrix(self, history):
+        return self.profiles[line_key(betting_line(self.root, history))]
+
+
+def observed_likelihood(menu, probabilities, action):
+    exact = fsum(p for c, p in zip(menu, probabilities, strict=True) if c.action == action)
+    if action.kind != ActionKind.RAISE or any(c.action == action for c in menu):
+        return exact
+    mass = fsum(p * exp(-abs(log(action.raise_to / c.action.raise_to)))
+                for c, p in zip(menu, probabilities, strict=True)
+                if c.action.kind == ActionKind.RAISE)
+    return max(.01, mass)
+
+
+class HU20TurnSearchPolicy:
+    """Live play retains full matrices; hypothetical probes only populate caches."""
+
+    # Owner-selected operating rule for the autonomous arena: a defect in the fixed-work protocol is recorded
+    # as a base-policy fallback (cause, timing and hand identity retained) and play continues. The strict
+    # default still raises before any action is chosen.
+    continue_on_defect = False
+
+    def _strict(self):
+        return self.config.decision_seconds is None and not self.continue_on_defect
+
+    def __init__(self, blueprint, solver, config=TurnSearchConfig()):
+        self._validate_blueprint(blueprint)
+        self._initialize(blueprint, solver, config)
+
+    @staticmethod
+    def _validate_blueprint(blueprint):
+        from src.blueprint.abstraction import EQUITY_SCHEMAS, MENU_V2_SCHEMAS
+        if getattr(blueprint, "abstraction", None) in MENU_V2_SCHEMAS:
+            raise ValueError("Search does not support menu-v2 schemas")
+        if getattr(blueprint, "abstraction", None) in EQUITY_SCHEMAS:
+            raise ValueError("K50 models are not yet supported by HU20 turn search blueprint ranges")
+
+    def _initialize(self, blueprint, solver, config):
+        self.blueprint = blueprint
+        self.abstraction = getattr(blueprint, "abstraction", None)
+        self.raise_cap = getattr(blueprint, "raise_cap", None)
+        self.game = getattr(blueprint, "game", None)
+        self.solver = solver
+        self.config = config
+        self.description = {"version": VERSION, "base": blueprint.description,
+                            "config": asdict(config),
+                            "external_identity": getattr(solver, "expected_sha256", None)}
+        self.identity = digest(self.description)
+        self.cache = OrderedDict()
+        self.range_cache = OrderedDict()
+        self.records = []
+        self.stats = Counter()
+        self.played = {}
+        self.live_hand_id = None
+        self.live_solutions = {}
+        self.live_turn_models = {}
+        self.last_turn_source = {}
+
+    def _compile_tree(self, root, history, **kwargs):
+        return compile_tree(root, history, **kwargs)
+
+    def _opponent_lock(self, history, observed_action, deadline):
+        return None
+
+    def _supported_holdings(self, solution, view):
+        return solution.matrix(view.history).holdings
+
+    def _try_ancestor(self, history, bot_seat, previous):
+        return True
+
+    def _key(self, history, bot_seat):
+        locks=[value[2] for (seat,prior),value in self.played.items()
+               if seat==bot_seat and len(prior)<len(history) and history[:len(prior)]==prior]
+        return digest([self.identity, bot_seat, public_identity(history),locks])
+
+    def _played_matrix(self, history, bot_seat):
+        value=self.played.get((bot_seat,history))
+        return value[0] if value else None
+
+    def _start_live_hand(self, hand_id):
+        if hand_id != self.live_hand_id:
+            self.played.clear()
+            self.live_solutions.clear()
+            self.live_turn_models.clear()
+            self.last_turn_source.clear()
+            self.live_hand_id=hand_id
+
+    def _turn_model(self, history, bot_seat):
+        key=bot_seat,history
+        if key in self.live_turn_models:
+            return True,self.live_turn_models[key]
+        last=self.last_turn_source.get(bot_seat)
+        if last and len(last[0])<=len(history) and history[:len(last[0])]==last[0]:
+            if last[1] is None:return True,None
+            try:return True,last[1].matrix(history)
+            except KeyError:pass
+        return False,None
+
+    def _observe_live_turn(self, history, bot_seat):
+        for index,event in enumerate(history):
+            if isinstance(event,ActionTaken) and event.street==Street.TURN and event.seat!=bot_seat:
+                prior=history[:index]
+                known,matrix=self._turn_model(prior,bot_seat)
+                if known:self.live_turn_models.setdefault((bot_seat,prior),matrix)
+
+    def _pin_live(self, view, solution=None, failure=None):
+        # These references survive probe LRU eviction and only real play writes them.
+        self.live_solutions[view.seat,view.history]=solution if solution is not None else failure
+        if view.street==Street.TURN:
+            for index,event in enumerate(view.history):
+                if isinstance(event,ActionTaken) and event.street==Street.TURN and event.seat!=view.seat:
+                    prior=view.history[:index]
+                    if solution is None:self.live_turn_models.setdefault((view.seat,prior),None)
+                    else:
+                        try:self.live_turn_models.setdefault((view.seat,prior),solution.matrix(prior))
+                        except KeyError:pass
+            self.last_turn_source[view.seat]=(view.history,solution)
+
+    def _remember_play(self, view, matrix, fallback, *, cause=None, supported=None):
+        identity=digest([public_identity(view.history),fallback,
+                         [(c.action.kind.value,c.action.raise_to) for c in matrix.menu],
+                         matrix.holdings,matrix.probabilities.tolist()])
+        self.played[view.seat,view.history]=(matrix,fallback,identity,
+            {"cause":cause,"supported":frozenset(matrix.holdings if supported is None else supported)})
+
+    @staticmethod
+    def _matches_played(candidate,used):
+        if not set(candidate.holdings).issubset(used.holding_indices):return False
+        actions={c.action:i for i,c in enumerate(used.menu)}
+        expected=np.zeros_like(candidate.probabilities)
+        for col,choice in enumerate(candidate.menu):
+            if choice.action in actions:
+                expected[:,col]=[used.probabilities[used.holding_indices[h],actions[choice.action]]
+                                 for h in candidate.holdings]
+        return bool(np.allclose(candidate.probabilities,expected,atol=2e-5,rtol=0))
+
+    def _complete_matrix(self,view,matrix,supported=None):
+        """Define unsupported rows from base before consulting the played holding."""
+        pairs=tuple(tuple(sorted(h)) for h in combinations((c for c in DECK if c not in view.board),2))
+        supported = set(matrix.holdings) if supported is None else set(supported)
+        if set(pairs)==set(matrix.holdings) and set(pairs)==supported:return matrix
+        base=self._base_matrix(view.history,pairs)
+        actions={c.action:i for i,c in enumerate(matrix.menu)}
+        rows=[]
+        for h in pairs:
+            if h in matrix.holding_indices and h in supported:rows.append(matrix.row(h))
+            else:
+                row=np.zeros(len(matrix.menu))
+                for c,p in zip(base.menu,base.row(h),strict=True):
+                    if c.action not in actions:
+                        raise SolveFailure("invalid_response","Search matrix omits a base fallback action")
+                    row[actions[c.action]]=p
+                rows.append(row)
+        values=np.asarray(rows);values.setflags(write=False)
+        return PolicyMatrix(matrix.menu,pairs,values)
+
+    def _put(self, cache, key, value):
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > self.config.cache_entries:
+            cache.popitem(last=False)
+            self.stats["evictions"] += 1
+
+    @staticmethod
+    def _check(deadline):
+        if deadline is not None and monotonic() >= deadline:
+            raise SolveFailure("timeout", "Public policy preparation deadline")
+
+    def _ranges(self, root, bot_seat, deadline):
+        key = self._key(root, bot_seat)
+        if key in self.range_cache:
+            self.range_cache.move_to_end(key)
+            return self.range_cache[key]
+        public = replay(root, 0, ())
+        pairs = tuple(combinations((c for c in DECK if c not in public.board), 2))
+        weights = {s: np.ones(len(pairs), dtype=np.float64) for s in (0, 1)}
+        counts = Counter()
+        for index, event in enumerate(root):
+            if not isinstance(event, ActionTaken):
+                continue
+            prior = root[:index]
+            matrix = None
+            if event.street == Street.TURN:
+                matrix=self._played_matrix(prior,bot_seat) if event.seat==bot_seat else None
+                known=False
+                if matrix is None:
+                    known,matrix=self._turn_model(prior,bot_seat)
+                    if known and matrix is None:counts["played_base_turn_actions"]+=1
+                if matrix is None and not known:
+                    try:
+                        matrix = self._resolve(prior, bot_seat, deadline).matrix(prior)
+                    except SolveFailure as exc:
+                        if self._strict():raise
+                        counts["turn_conditioning_fallback:" + exc.cause] += 1
+                        self.stats["range:turn_conditioning_fallback:"+exc.cause]+=1
+            for j, pair in enumerate(pairs):
+                self._check(deadline)
+                if matrix is not None and tuple(sorted(pair)) in matrix.holding_indices:
+                    likelihood = observed_likelihood(matrix.menu, matrix.row(pair), event.action)
+                    counts["turn_solution_factors"] += 1
+                else:
+                    view = replay(prior, event.seat, pair)
+                    menu, p, trained = self.blueprint.distribution(view)
+                    likelihood = observed_likelihood(menu, p, event.action)
+                    counts["trained" if trained else "missing"] += 1
+                    if hasattr(self.blueprint, "zero_mass") and trained:
+                        counts["zero_average_mass"] += int(information_key(view, menu,
+                            schema=self.blueprint.abstraction) in self.blueprint.zero_mass)
+                    counts["off_menu_factors"] += int(event.action not in [c.action for c in menu])
+                if likelihood == 0:
+                    counts["zero_likelihood:own" if event.seat == bot_seat else "zero_likelihood:opponent"] += 1
+                if event.seat != bot_seat and likelihood < self.config.opponent_likelihood_floor:
+                    likelihood = self.config.opponent_likelihood_floor
+                    counts["floored_opponent_factors"] += 1
+                weights[event.seat][j] *= likelihood
+            total = float(weights[event.seat].sum())
+            if total <= 0:
+                who = "own" if event.seat == bot_seat else "opponent"
+                self.stats["zero_support:" + who] += 1
+                raise SolveFailure("zero_support_" + who, "Public action range has no support")
+            weights[event.seat] /= total
+        ranges = {s: tuple((tuple(sorted(h)), float(w)) for h, w in zip(pairs, weights[s], strict=True))
+                  for s in (0, 1)}
+        # A product law is normalized only over disjoint private holdings.
+        supported = [[set(h) for h, w in ranges[s] if w > 0] for s in (0, 1)]
+        if not any(not a.intersection(b) for a in supported[0] for b in supported[1]):
+            raise SolveFailure("zero_joint_support", "Empty compatible private law")
+        counts.update({"holdings_per_seat": len(pairs),
+                       "positive_holdings:0": int((weights[0] > 0).sum()),
+                       "positive_holdings:1": int((weights[1] > 0).sum())})
+        result = ranges, dict(counts)
+        self._put(self.range_cache, key, result)
+        return result
+
+    def _base_matrix(self, history, holdings):
+        view = replay(history, replay(history, 0, ()).actor, holdings[0])
+        menu = self.blueprint.distribution(view)[0]
+        rows = []
+        for pair in holdings:
+            other, p, _ = self.blueprint.distribution(replay(history, view.seat, pair))
+            if other != menu:
+                raise SolveFailure("invalid_base", "Base action menu depends on private cards")
+            rows.append(p)
+        p = np.asarray(rows, dtype=np.float64)
+        p.setflags(write=False)
+        return PolicyMatrix(menu, tuple(holdings), p)
+
+    def _resolve(self, history, bot_seat, deadline):
+        self._check(deadline)
+        pinned=self.live_solutions.get((bot_seat,history))
+        if pinned is not None:
+            self.stats["live_solution_hits"]+=1
+            if isinstance(pinned,SolveFailure):raise pinned
+            return pinned
+        key = self._key(history, bot_seat)
+        if key in self.cache:
+            result = self.cache[key]
+            self.cache.move_to_end(key)
+            self.stats["public_cache_hits"] += 1
+            if isinstance(result, SolveFailure):
+                raise result
+            return result
+        root = round_root(history)
+        previous = [(i, e) for i, e in enumerate(history) if i >= len(root)
+                    and isinstance(e, ActionTaken)]
+        if previous and self._try_ancestor(history, bot_seat, previous):
+            prior = history[:previous[-1][0]]
+            try:
+                solution = self._resolve(prior, bot_seat, deadline)
+                solution.matrix(history)
+                consistent=True
+                for index,event in previous:
+                    used=(self._played_matrix(history[:index],bot_seat) if event.seat==bot_seat
+                          else self._opponent_lock(history[:index], event.action, deadline))
+                    if used is not None:
+                        candidate=solution.matrix(history[:index])
+                        if not self._matches_played(candidate,used):
+                            consistent=False;break
+                if consistent:
+                    self._put(self.cache, key, solution)
+                    self.stats["on_tree_queries"] += 1
+                    return solution
+            except KeyError:
+                pass
+            except SolveFailure:
+                if self._strict():raise
+                # Prior failed decisions stay base-policy locks, never vanish.
+                pass
+        started = monotonic()
+        try:
+            ranges, coverage = self._ranges(root, bot_seat, deadline)
+            fixed = {}
+            for index, event in previous:
+                if event.seat != bot_seat:
+                    matrix = self._opponent_lock(history[:index], event.action, deadline)
+                    if matrix is not None:
+                        fixed[line_key(betting_line(root, history[:index]))] = matrix
+                    continue
+                prior = history[:index]
+                matrix=self._played_matrix(prior,bot_seat)
+                if matrix is None:
+                    try:
+                        matrix = self._resolve(prior, bot_seat, deadline).matrix(prior)
+                    except SolveFailure:
+                        if self._strict():raise
+                        holdings = [h for h, w in ranges[bot_seat] if w > 0]
+                        matrix = self._base_matrix(prior, holdings)
+                fixed[line_key(betting_line(root, prior))] = matrix
+            request = self._compile_tree(root, history, menu=self.config.menu,
+                max_nodes=self.config.max_public_nodes, deadline=deadline,
+                fixed_menus={k: tuple(c.action for c in m.menu) for k, m in fixed.items()})
+            request.update(threads=self.config.threads, compress=self.config.compress,
+                           max_iterations=self.config.iterations,
+                           memory_budget_bytes=self.config.memory_budget_bytes,
+                           ranges=[[{"hand": list(h), "weight": w} for h, w in ranges[s]]
+                                   for s in request["seat_map"]], locks=[])
+            for node in request["nodes"]:
+                matrix = fixed.get(line_key(node["line"]))
+                if matrix is None or node["terminal"]:
+                    continue
+                policy = np.zeros((len(node["actions"]), len(matrix.holdings)))
+                # Amounts are absolute raise-to; reconstruct the prior node for jam/kind.
+                prior = next(history[:i] for i, e in previous
+                             if line_key(betting_line(root, history[:i])) == line_key(node["line"]))
+                prior_view = replay(prior, replay(prior, 0, ()).actor, ())
+                old = {line_key([solver_action(prior_view, c.action)])[0]: i
+                       for i, c in enumerate(matrix.menu)}
+                for a, token in enumerate(node["actions"]):
+                    if line_key([token])[0] in old:
+                        policy[a] = matrix.probabilities[:, old[line_key([token])[0]]]
+                request["locks"].append({"line": node["line"], "board": request["board"],
+                    "player": node["player"], "actions": node["actions"],
+                    "holdings": [list(h) for h in matrix.holdings], "strategy": policy.ravel().tolist()})
+            if self.config.decision_seconds is None:
+                request["work_protocol"]="hu20-fixed50-no-fallback-v1"
+            self._check(deadline)
+            profiles = self.solver.solve(request, deadline)
+            self._check(deadline)
+            solution = PublicSolution(root, request, profiles, ranges, coverage)
+            solution.matrix(history)
+            self._put(self.cache, key, solution)
+            self.stats["solves"] += 1
+            self.records.append({"status": "completed", "public_history": public_identity(history),
+                "street": request["initial_street"], "range_coverage": coverage,
+                "frozen_hero_nodes": sum(e.seat == bot_seat for _, e in previous),
+                "frozen_opponent_nodes": sum(e.seat != bot_seat for _, e in previous)
+                    if any(e.seat != bot_seat and line_key(betting_line(root, history[:i])) in fixed
+                           for i, e in previous) else 0,
+                "seconds": monotonic() - started,
+                "request_identity": digest({k: v for k, v in request.items() if k != "seconds"})})
+            return solution
+        except (TimeoutError, MemoryError, ValueError, KeyError) as exc:
+            failure = exc if isinstance(exc, SolveFailure) else SolveFailure(
+                "timeout" if isinstance(exc, TimeoutError) else "memory_refusal" if isinstance(exc, MemoryError)
+                else "invalid_response", str(exc))
+            self._put(self.cache, key, failure)
+            self.records.append({"status": "failure", "cause": failure.cause,
+                "public_history": public_identity(history), "seconds": monotonic() - started})
+            raise failure
+
+    def distribution(self, view, *, query_kind="probe"):
+        if view.finished or view.actor != view.seat:
+            raise ValueError("Search policy requires an acting-seat observation")
+        self.stats[query_kind+":queries:"+view.street.value]+=1
+        if query_kind=="play":self._start_live_hand(view.hand_id)
+        if view.street not in (Street.TURN, Street.RIVER):
+            return self.blueprint.distribution(view)
+        if query_kind=="play":self._observe_live_turn(view.history,view.seat)
+        used=self.played.get((view.seat,view.history))
+        if used is not None:
+            self.stats["played_matrix_hits"]+=1
+            if used[1] or tuple(sorted(view.hole_cards)) not in used[3]["supported"]:
+                cause=used[3]["cause"] if used[1] else "unsupported_holding"
+                if self._strict():raise SolveFailure(cause,"Cached search defect")
+                self.stats[query_kind+":fallback:"+cause]+=1
+                return self.blueprint.distribution(view)
+            self.stats[query_kind+":search"]+=1
+            try:return used[0].menu,used[0].row(view.hole_cards),True
+            except SolveFailure:
+                if self._strict():raise
+                return self.blueprint.distribution(view)
+        started = monotonic()
+        deadline=None if self.config.decision_seconds is None else started+self.config.decision_seconds
+        try:
+            solution = self._resolve(view.history, view.seat, deadline)
+            matrix = solution.matrix(view.history)
+            supported = self._supported_holdings(solution, view)
+            if query_kind=="play":
+                played_matrix=self._complete_matrix(view,matrix,supported)
+                self._check(deadline)
+            if tuple(sorted(view.hole_cards)) not in supported:
+                raise SolveFailure("unsupported_holding", "Holding has zero conditional reach")
+            probabilities = matrix.row(view.hole_cards)
+            for choice in matrix.menu:
+                view.legal_actions.validate(choice.action)
+            self.stats[query_kind + ":search"] += 1
+            if query_kind == "play":
+                self._remember_play(view,played_matrix,False,supported=supported)
+                self._pin_live(view,solution=solution)
+                self.records.append({"status": "decision", "street": view.street.value,
+                    "public_history": public_identity(view.history),
+                    "seconds": monotonic() - started, "fallback": False,
+                    "host_telemetry":getattr(self.solver,"records",[{}])[-1].get("host_telemetry")
+                        if getattr(self.solver,"records",[]) else None})
+            return matrix.menu, probabilities, True
+        except (SolveFailure, ValueError, KeyError) as exc:
+            cause = exc.cause if isinstance(exc, SolveFailure) else "invalid_response"
+            if self._strict():
+                self.stats[query_kind+":defect:"+cause]+=1
+                self.records.append({"status":"defect","cause":cause,"query_kind":query_kind,
+                    "street":view.street.value,"public_history":public_identity(view.history),
+                    "seconds":monotonic()-started})
+                raise SolveFailure(cause,str(exc)) from exc
+            self.stats[query_kind + ":fallback:" + cause] += 1
+            self.records.append({"status": "fallback", "cause": cause, "query_kind": query_kind,
+                "street": view.street.value, "public_history": public_identity(view.history),
+                "seconds": monotonic() - started})
+            menu, p, trained = self.blueprint.distribution(view)
+            for choice in menu:
+                view.legal_actions.validate(choice.action)
+            if query_kind=="play":
+                if cause=="unsupported_holding":
+                    self._remember_play(view,played_matrix,False,supported=supported)
+                    self._pin_live(view,solution=solution)
+                else:
+                    pairs=tuple(tuple(sorted(h)) for h in combinations((c for c in DECK if c not in view.board),2))
+                    self._remember_play(view,self._base_matrix(view.history,pairs),True,cause=cause)
+                    self._pin_live(view,failure=SolveFailure(cause,str(exc)))
+            return menu, p, trained
+
+
+class HU20TurnSearchPlayer:
+    def __init__(self, policy, seed):
+        self.policy = policy
+        self.random = Random(seed)
+
+    def choose_action(self, view):
+        menu, p, _ = self.policy.distribution(view, query_kind="play")
+        action = self.random.choices(menu, weights=p, k=1)[0].action
+        view.legal_actions.validate(action)
+        return action

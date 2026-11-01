@@ -1,0 +1,47 @@
+\section{Design Choices}\label{supp:design}
+In this section, we hope to motivate some of the design choices we made in order to optimize BluffJAX for performance and usability.
+
+\subsection{Binary or One-Hot Features?}
+Our environments often contain features which are binary, e.g. whether the agent currently has the ability to play a certain action or not. We conduct a simple test to see whether a neural network is better able to distinguish features of this type when they are represented in binary format [0/1] or one-hot format [10/01]. We train a neural network on a randomized regression task with one input feature and two output features. We train the network on 20,000 examples over 10 epochs. In order to standardize the number of input neurons, we feed the binary features as [00/11] instead of [0/1].
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{02_images/logits/training_loss_over_epochs.pdf}
+        \caption{Training loss}
+        \label{fig:loss}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.45\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{02_images/logits/cosine_similarity_over_training.pdf}
+        \caption{Representation cosine similarity}
+        \label{fig:css}
+    \end{subfigure}
+    \caption{Training loss and cosine similarity of representations during training. Results show mean and std error over 10 seeds with 20,000 datapoints each.}
+    \label{fig:logits}
+\end{figure}
+
+Figure~\ref{fig:logits} shows the results; the training loss indicates that the network learns the regression task faster when the features are one-hot rather than binary. This makes intuitive sense, as one-hot features `separate' the distinct input types, thereby saving the network from having to build an internal representation to partition `0' inputs from `1' inputs. However, Figure~\ref{fig:css} demonstrates that the cosine similarity of the internal representations of the distinct inputs was \textit{already} low at the start of training (inferring that they were already separated in feature space) and they actually become more similar over the course of training. This suggests that one-hot features can help learning when used, but their representational separation is not necessarily optimized for or maintained during learning.
+
+\subsection{Parallel or AEC API?}
+One consideration when designing a multi-agent benchmark is whether the environments are more amenable to a parallel agent-environment interaction interface or an agent-environment-cycle (AEC) interface. Similar to PettingZoo~\citep{terry2021pettingzoo}, we choose to implement both in BluffJAX. In turn-based games where most steps only involve one agent, a parallel interface wastes significant compute by querying all other agents but forcing them to choose noop actions; on the other hand, certain environments like Goofspiel naturally follow a parallel-action game loop.
+
+\subsection{Handle resets internally or externally?}
+In parallelized settings, JAX requires all conditional logic to be executed regardless of whether the results are used or not\footnote{https://docs.jax.dev/en/latest/\_autosummary/jax.lax.cond.html}. Therefore, the typical RL `state$\rightarrow$action$\rightarrow$ next state' loop must be accompanied at each instance by reset logic, and the correct `next state' is chosen depending on the termination condition of the episode. The choice thus remains of whether to handle this logic inside the environment API, or to expose this logic for the user to handle. In BluffJAX, we choose to handle this logic internally, as users don't typically need to know/worry about this, and exposing it simply adds to the confusion that befalls JAX newcomers.
+
+\subsection{Game logic datatypes: floats or ints?}
+This question arises as a consequence of conversions; internal game logic must often convert actions (which arrive as \mintinline{Python}{jax.numpy.int32} in discrete settings), and the input to a neural network must typically be of the type \mintinline{Python}{jax.numpy.float32}. Therefore, which datatype should be used for internal game logic? Does the conversion cost matter? We find that the cost is generally \textbf{negligible} within the overall training loop, and therefore we simply use whichever datatype is most convenient in each case.
+
+\subsection{Done, absorbing, truncated, terminated?}
+Environment suites do not generally agree on a convention on how to distinguish when agents reach absorbing states or reach a horizon. We choose to implement both: our API provides a boolean array \mintinline{Python}{absorbing} to indicate the absorbing state of each agent (as some may drop out of a game earlier than others) as well as a single boolean \mintinline{Python}{done} if all agents have reached absorbing states or if the global episode horizon has been reached.
+
+\subsection{Type hints?}
+What type hints should be given to users to understand the code? We find no universally consistent typing scheme for JAX functions and arrays. We therefore implement our own type hints that we hope are useful in distinguishing normal Python types from JAX arrays and pytrees.
+
+\subsection{Randomize the start player?}
+In self-play settings, this question has no bearing since the same network will be trained on all agent data. However, if distinct players are loaded into a game (e.g. if a training model is loaded as `player 1' and a baseline model as `player 2', then player order absolutely makes a difference, and thus we randomize the starting player in all cases for simplicity.
+
+\subsection{Give the agent an observation of its own order?}
+We find that this feature either does not help or actively harms learning in practice, as it causes agents to overfit to this feature rather than generalize across experiences while agnostic to the player they originated from. We therefore omit this feature in all games except where it explicitly matters (e.g. whether you are the start player or second player in Kuhn and Leduc Poker matters).

@@ -1,0 +1,170 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2026
+
+% The authors should use one of these tracks.
+% Before accepting by the NeurIPS conference, select one of the options below.
+% 0. "default" for submission
+%\usepackage{neurips_2026}
+% the "default" option is equal to the "main" option, which is used for the Main Track with double-blind reviewing.
+% 1. "main" option is used for the Main Track
+%  \usepackage[main]{neurips_2026}
+% 2. "position" option is used for the Position Paper Track
+%  \usepackage[position]{neurips_2026}
+% 3. "eandd" option is used for the Evaluations & Datasets Track
+% \usepackage[eandd]{neurips_2026}
+% 4. "creativeai" option is used for the Creative AI Track
+%  \usepackage[creativeai]{neurips_2026}
+% 5. "sglblindworkshop" option is used for the Workshop with single-blind reviewing
+ % \usepackage[sglblindworkshop]{neurips_2026}
+% 6. "dblblindworkshop" option is used for the Workshop with double-blind reviewing
+%  \usepackage[dblblindworkshop]{neurips_2026}
+
+% After being accepted, the authors should add "final" behind the track to compile a camera-ready version.
+% 1. Main Track
+ % \usepackage[main, final]{neurips_2026}
+% 2. Position Paper Track
+%  \usepackage[position, final]{neurips_2026}
+% 3. Evaluations & Datasets Track
+ % \usepackage[eandd, final]{neurips_2026}
+% 4. Creative AI Track
+%  \usepackage[creativeai, final]{neurips_2026}
+% 5. Workshop with single-blind reviewing
+%  \usepackage[sglblindworkshop, final]{neurips_2026}
+% 6. Workshop with double-blind reviewing
+%  \usepackage[dblblindworkshop, final]{neurips_2026}
+% Note. For the workshop paper template, both \title{} and \workshoptitle{} are required, with the former indicating the paper title shown in the title and the latter indicating the workshop title displayed in the footnote.
+% For workshops (5., 6.), the authors should add the name of the workshop, "\workshoptitle" command is used to set the workshop title.
+% \workshoptitle{WORKSHOP TITLE}
+
+% "preprint" option is used for arXiv or other preprint submissions
+ \usepackage[preprint]{neurips_2026}
+
+% to avoid loading the natbib package, add option nonatbib:
+%    \usepackage[nonatbib]{neurips_2026}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage[hidelinks]{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+
+% CUSTOM
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{wrapfig}
+% minted needs -shell-escape, which arXiv does not allow; use listings instead
+\newcommand{\mintinline}[1]{\lstinline[basicstyle=\ttfamily\color{codeblack}]}
+\usepackage{caption}
+\usepackage{subcaption}
+\captionsetup[subfigure]{justification=centering,singlelinecheck=false}
+% \captionsetup[table]{skip=-5pt}
+\usepackage{makecell}
+\usepackage{listings}
+\usepackage{pifont}
+\newcommand{\cmark}{\textcolor{green}{\ding{51}}} % tick
+\newcommand{\xmark}{\textcolor{red}{\ding{55}}}   % cross
+
+\definecolor{codegreen}{rgb}{0.0,0.5,0.2}       % Libraries / imports
+\definecolor{codeyellow}{rgb}{0.75,0.55,0.0}    % Function names
+\definecolor{codeblue}{rgb}{0.0,0.2,0.7}        % Keywords
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}        % Line numbers
+\definecolor{codepurple}{rgb}{0.58,0,0.82}      % Strings
+\definecolor{codeblack}{rgb}{0.1,0.1,0.1}       % Main text
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinelanguage{PythonCustom}{
+    language=Python,
+    morekeywords={self},
+    keywordstyle=\color{codeblue}\bfseries,
+    emph={
+        numpy,pandas,matplotlib,seaborn,torch,tensorflow,
+        sklearn,scipy,os,sys,json,re,math,jax,bluffjax,agent
+    },
+    emphstyle=\color{codegreen},
+    % Functions / built-ins
+    emph={[2]
+    print,len,range,input,type,int,float,str,list,dict,set,
+        tuple,open,sum,min,max,abs
+    },
+    emphstyle={[2]\color{codeyellow}},
+}
+
+\lstdefinestyle{mystyle}{
+    basicstyle=\ttfamily\footnotesize\color{codeblack},
+    commentstyle=\color{codegreen},
+    stringstyle=\color{codepurple},
+    numberstyle=\tiny\color{codegray},
+    keywordstyle=\color{codeblue}\bfseries,
+    backgroundcolor=\color{backcolour},   
+    breaklines=true,
+    breakatwhitespace=false,
+    keepspaces=true,
+    numbers=left,
+    numbersep=10pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=4,
+    frame=none
+}
+
+\lstset{
+    style=mystyle,
+    language=PythonCustom
+}
+
+% Note. For the workshop paper template, both \title{} and \workshoptitle{} are required, with the former indicating the paper title shown in the title and the latter indicating the workshop title displayed in the footnote. 
+\title{BluffJAX: Adversarial Imperfect Information Games in JAX}
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+
+\author{%
+  Aryaman Reddi$^{1,2}$\thanks{Correspondence to \texttt{<aryaman.reddi@tu-darmstadt.de>}}, Jan Peters$^{1,2,3}$, Carlo D'Eramo$^{4}$ \\
+  $^1$Department of Computer Science, TU Darmstadt, Germany \\
+  $^2$Hessian Center for Artificial Intelligence (Hessian.ai), Germany \\
+  $^3$German Research Center for AI (DFKI), Systems AI for Robot Learning, Germany \\
+  $^4$Center for Artificial Intelligence and Data Science, University of Würzburg, Germany \\
+  % examples of more authors
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+}
+
+
+
+\begin{document}
+\maketitle
+\input{01_sections/00_abstract}
+\input{01_sections/01_intro}
+\input{01_sections/02_related}
+\input{01_sections/03_bluffjax}
+\input{01_sections/04_benchmarking}
+\input{01_sections/05_results}
+\input{01_sections/06_conclusion}
+\bibliography{references}
+\bibliographystyle{plainnat}
+\newpage
+\input{01_sections/091_app_games}
+\input{01_sections/092_app_design}
+\input{01_sections/093_app_baselines}
+\input{01_sections/094_app_head2head}
+\newpage
+\input{checklist.tex}
+\end{document}

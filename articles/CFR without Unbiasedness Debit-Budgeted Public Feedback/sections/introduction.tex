@@ -1,0 +1,91 @@
+\section{Introduction}
+\label{sec:introduction}
+
+Counterfactual regret minimization (CFR) computes approximate equilibria in
+large imperfect-information games by alternating counterfactual evaluation
+with local regret updates \citep{zinkevich2007cfr}.  Public chance often
+creates a finite cut of outcomes observed by both players.  Evaluating every
+outcome gives an exact update; evaluating a smaller batch lowers the work per
+update and permits more frequent learner transitions.  Public Chance Sampling
+and Monte Carlo CFR (MCCFR) obtain guarantees by making each sampled update a
+conditionally valid estimator of its target
+\citep{lanctot2009mccfr,johanson2012pcs,farina2020stochastic}.
+
+Many high-throughput solvers use a different pattern.  They process a fixed
+public order without replacement, update the learner after each batch, and
+continue the order across the epoch.  Every outcome appears equally often,
+but later batches are evaluated at profiles produced by earlier feedback.
+The delivered row is therefore coupled to its own history.  Exact counts at
+the end of an epoch do not make the intermediate rows conditionally unbiased,
+and regret on those rows need not control exploitability in the full game.
+
+The two-outcome case isolates the issue.  Let $X_A(\sigma)$ and
+$X_B(\sigma)$ be centered public components at profile $\sigma$.  Processing
+$A$ and then $B$ delivers $2X_A(\sigma_t)$, updates the strategy, and then
+delivers $2X_B(\sigma_{t+1})$.  Relative to dense feedback at both origins,
+the epoch error is
+\[
+ [X_A(\sigma_t)-X_A(\sigma_{t+1})]
+ -[X_B(\sigma_t)-X_B(\sigma_{t+1})].
+\]
+Coverage cancels static selection error, but not the interaction between
+component identity and learner motion.  We call the resulting one-sided
+full-game correction the \emph{target debit};
+Figure~\ref{fig:two-outcome-mechanism} illustrates the mechanism.
+
+\begin{figure}[t]
+\centering
+\input{figures/two_outcome_mechanism}
+\caption{Balanced selection cancels static component error.  Learner updates
+between partial batches leave target debit; complete coverage evaluates all
+components at one origin and has zero debit.}
+\label{fig:two-outcome-mechanism}
+\end{figure}
+
+Our central result turns this error into a decision account.  For each local
+row, only cumulative coordinates on which delivered feedback
+\emph{underestimates} the dense target can increase target regret.
+Theorem~\ref{thm:weighted-target-debit} combines this one-sided row transfer
+with the native alternating CFR reduction.  It bounds weighted exploitability
+by delivered-row regret, target debit, and a native alternating correction.
+
+Debit-Budgeted CFR (DB-CFR) uses this account causally.  At an aligned block
+boundary, it selects a width and order from completed history, executes that
+plan once, and settles its charge afterward.  Partial execution continues
+while the settled account is solvent and at most $\ell$ audits remain
+unsettled; otherwise the method executes complete coverage, whose debit is
+exactly zero.  Theorem~\ref{thm:debit-controller} shows that hidden debit is at
+most the sum of the $\ell$ largest predictable block envelopes.  For fixed
+blocks and polynomial output weights, a fixed audit cap contributes only
+$O(T^{-1})$ and preserves the additive-RM/RM+ rate.  Thus target validity does
+not require either per-event unbiasedness or future candidate replay.
+
+The settled charge must contain semantic information.  Our finite converse compares
+two four-round plans with the same public counts, work, task graph, prefix
+discrepancy, and scalar strategy-path length.  Their exact controller charges
+are $0$ and $11/8$.  Any sound rule based only on those shared summaries must
+charge both by at least $11/8$ and therefore rejects the safe plan at budget
+one.  A strict-budget admission rule limited to the same summaries must also
+reject both before execution.  DB-CFR resolves this information boundary by
+settling semantic debit after the selected block and reserving for the bounded
+outstanding account.
+
+The empirical program first establishes the decision geometry, then changes
+the learner path.  Released HUNL turn endgames show that partial width dominates
+at shallow budgets, that order changes quality at fixed coverage, and that
+complete coverage overtakes every partial width between 32 and 64 full-cut
+budgets.  In public Leduc, widths 2, 5, and 10 occupy one work--debit frontier.
+A lagged completed-history rule fixed on four development orders then beats the
+best fixed width at no greater installed recurrence work on all ten unseen
+orders, with median NashConv improvement 0.0456 and no future candidate
+replay.  A separate HUNL resource audit measures the exact selected-path
+certificate rather than treating it as free work.
+
+Our contributions are threefold.  \textbf{(i)} We establish a weighted,
+one-sided target-debit theorem for deterministic partial public feedback under
+native alternating CFR.  \textbf{(ii)} We introduce causal DB-CFR and prove
+that bounded settlement removes future candidate replay while preserving the
+additive-RM/RM+ rate; strict separations distinguish its charge from symmetric
+and metadata-only alternatives.  \textbf{(iii)} We provide two-domain
+evidence for the public width/order problem, finite trace certificates, and a
+held-out dynamic-width consequence.

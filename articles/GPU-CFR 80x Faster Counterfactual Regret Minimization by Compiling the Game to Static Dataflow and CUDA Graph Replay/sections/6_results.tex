@@ -1,0 +1,215 @@
+\section{Results}
+\label{sec:results}
+\input{figures/TABLE_T2_matrix.tex}
+
+\begin{figure*}[!htb]
+    \centering
+    \begin{minipage}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig2_ladder.pdf}
+        \Description{Two bar panels. The left panel shows per-iteration time dropping
+        from 11.667 milliseconds for the eager reference to 0.619 for the compiled
+        dataflow and 0.397 for the CUDA graph, with arrows marking the 19 times, 1.6
+        times, and overall 29 times reductions. The right panel shows Aten operations
+        per iteration dropping from 1742 to 96, an 18 times reduction.}
+        \captionof{figure}{Per-iteration time (left) and PyTorch/Aten operations (right)
+        on the HUNL turn subgame.}
+        \label{fig:ladder}
+    \end{minipage}\hfill
+    % 0.465 against fig2's 0.48 so fig6's 3.2in canvas scales by the same 0.80 as
+    % fig2's 3.3in one; matching the scale factors keeps the type in both plots at
+    % one size, and the remaining 0.055 is the gutter between the two captions.
+    \begin{minipage}[t]{0.465\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig6_scaling.pdf}
+        \Description{Log-log plot of milliseconds per CFR-plus iteration against the
+        number of States. The measured solid curve rises only 2.9 times while a dash-dot
+        reference line of slope one rises 37.9 times; a dashed second axis shows
+        achieved bandwidth reaching about 107 gigabytes per second at the largest
+        size.}
+        \captionof{figure}{HUNL turn scaling, $K=4$ to $24$ hands per player (46k to
+        1.76M States). Solid: steady-state graph time; dashed: achieved bandwidth.}
+        \label{fig:scaling}
+    \end{minipage}
+\end{figure*}
+
+\paragraph{Cross-framework timing.}
+\label{sec:matrix}
+\Cref{tab:matrix} and \cref{fig:hero} show that the preferred execution model
+changes with game size. On the smallest trees the single-threaded C++ library wins.
+The GPU pays a fixed launch-and-replay floor of about $0.113$\,ms per iteration, and
+a 54-Infoset game cannot fill it. The compiled dataflow overtakes the CPU frameworks
+as the game grows, and the margin widens from the HUNL turn subgame upward. There
+graph replay is \liteGraphTurn$\times$ faster per iteration than LiteEFG. Across nearly four decades of game
+size its per-iteration time changes by only about $5\times$. The number of dispatches
+is set by tree depth, and additional states only widen each batched operation.
+
+
+Kim (2026)~\cite{kim2026parallelizing} runs sequence-form CFR$^{+}$ on the same
+A100, so the gap to it measures execution representation alone. The graph-replayed path is \kimGraphRange$\times$
+faster across the eight-game suite, with a median of \kimGraphMedian$\times$, and the
+eager compiled path is \kimEagerRange$\times$ faster. The flat schedule therefore carries most of the margin and graph replay adds the
+rest. \Cref{tab:ttt} confirms the same ordering at matched exploitability
+thresholds. The representation carries most of the
+speedup. On eight CPU threads and no accelerator, the compiled
+solver is \kimCpuRange$\times$ faster than the A100 baseline on all eight games, with
+a median of \kimCpuMedian$\times$, and graph replay is a further
+\graphCpuLargestRange$\times$ ahead of that CPU arm on the four largest games. Eight threads is a fair CPU ceiling for this dataflow. The sweep to 28 pinned cores
+in \cref{fig:cpuscaling} saturates early, because a depth block is too small for the
+intra-operator thread pool to split further. Against LiteEFG \cite{liu2024liteefg},
+the general compiled CPU library, the same pattern holds. The eight-thread arm is already \cpuLiteLargestRange$\times$ faster on the four
+largest games, and graph replay extends the margin to \liteGraphLargestRange$\times$.
+
+\paragraph{Where the speed comes from.}
+\label{sec:ladder}
+\input{figures/TABLE_T6_overhead.tex}
+The HUNL turn ablation in \cref{fig:ladder} times the two stages of the design in one
+process under one software stack. Compiling the reference iteration into the
+depth-level dataflow cuts Aten operations by $18\times$ and time by $19\times$. Graph
+replay then removes the remaining host submissions for a further $1.6\times$, giving a
+$29\times$ ladder end to end. The Nsight traces in \cref{app:profile} show the
+mechanism. The eager path issues 87 kernel launches per iteration and keeps the GPU
+busy a third of the time. Graph replay issues one graph launch per iteration and keeps
+the GPU busy 94\% of the time. Recording 100 iterations per graph or handing the same body to
+\texttt{torch.compile} \cite{paszke2019pytorch} changes nothing further. The
+remaining time is the execution of the same 87 small gather and scatter kernels. The prior GPU baseline \cite{kim2026parallelizing} cannot take the second step at
+all. Its iteration calls cuSPARSE through CuPy, which refuses to run under stream
+capture. Its per-level row slicing and index assignment also move data between host
+and device on every iteration. Capture therefore fails on the first sparse product
+even at Kuhn size (\cref{app:profile}). Capturability is a property of the representation.
+
+\Cref{fig:graphablation} shows graph-vs-eager steady-state times for every game. The
+multiplier shrinks as trees grow, from 3.6$\times$ on Kuhn (54 Infosets,
+fully launch-bound) to 1.6$\times$ on the HUNL turn subgame (83k Infosets), because
+kernel execution time grows with data volume while launch overhead is fixed.
+
+\begin{figure}[!htb]
+  \begin{minipage}[b]{0.48\linewidth}\centering
+    \includegraphics[width=\linewidth]{figures/fig7_cpu_scaling.pdf}
+    \Description{Log-log plot of milliseconds per iteration against CPU thread count
+    for four games; each measured curve flattens after eight threads while a dash-dot
+    ideal-scaling line keeps falling.}
+    \caption{CPU thread scaling of the compiled solver (eager, CFR$^{+}$); dash-dot
+    lines mark ideal scaling from the one-thread point, the dotted line the 8-thread
+    arm of \cref{tab:matrix}.}
+    \label{fig:cpuscaling}
+  \end{minipage}\hfill
+  \begin{minipage}[b]{0.48\linewidth}\centering
+    \includegraphics[width=\linewidth]{figures/fig3_graph_ablation.pdf}
+    \Description{Grouped bar chart with one pair of bars per game on a log scale:
+    a light bar for eager execution and a dark bar for CUDA-graph replay. The ratio
+    printed above each pair shrinks from 3.6 times on Kuhn to 1.6 times on the HUNL
+    turn subgame.}
+    \caption{CUDA-graph replay vs.\ eager execution: steady-state ms per CFR$^{+}$
+    iteration for every game (log scale). Labels give the eager/graph ratio.}
+    \label{fig:graphablation}
+  \end{minipage}
+\end{figure}
+
+The scaling sweep in \cref{fig:scaling} explains why the compiled schedule keeps
+paying off on larger trees. Growing the turn subgame from 4 to 24 hands per player
+multiplies the node count by $37.9\times$ while iteration time grows only
+$2.95\times$. The extra hands add data volume and leave tree depth nearly unchanged,
+so the operation sequence stays fixed and each operation simply gets wider. Achieved
+bandwidth from a bytes-moved model reaches $5.5\%$ of the A100 peak at the largest
+size, and hardware counters put measured traffic at $17\%$ (\cref{app:profile}). The
+sweep is governed by launch latency and depth, not by bandwidth.
+
+Precision and memory follow the same logic. Float64 costs $1.08\times$ on the graph
+path for the turn subgame and nothing on Leduc, with eager times unchanged. Iteration
+time is set by dispatch, and the arithmetic is a small part of it.
+\Cref{tab:memory} (\cref{app:extra}) lists peak GPU memory per game against the
+analytic model of \cref{sec:compiled}. Across the scaling sweep, allocated memory per tree node stays within
+a $3\%$ band while the tree grows $37.9\times$, so memory scales linearly over the
+tested range.
+
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.95\linewidth]{figures/fig4_curves_wide.pdf}
+    \Description{Six log-log panels, one per game, plotting exploitability against
+    training wall-clock seconds for up to five backends. In every panel the GPU-CFR
+    CUDA-graph curve sits lowest, reaching lower exploitability earlier; the CPU arm
+    of the same compiled solver follows, then the Kim baseline, LiteEFG, and
+    OpenSpiel.}
+    \caption{Exploitability versus training wall-clock (both axes logarithmic) on four public
+    games and the native HUNL subgames.}
+    \label{fig:curves}
+\end{figure}
+
+\paragraph{Quality against wall-clock.}
+\label{sec:quality}
+\Cref{fig:curves} plots exploitability against training wall-clock. Each backend
+runs its library's native preset (\cref{tab:matrix,tab:semantics}; the update-rule
+study is in \cref{sec:convergence}), so the LiteEFG and OpenSpiel traces also differ
+in algorithm. The matched-semantics comparison is GPU-CFR against Kim. The HUNL
+panels use the shared exports and compare GPU-CFR on CUDA, our compiled CFR$^{+}$
+implementation on CPU, Kim's NoRegret CFR$^{+}$ on CUDA, and LiteEFG's native vanilla
+CFR. Each arm runs 10 independent processes at six log-spaced wall-clock targets from
+0.1 to 30 seconds. Points are medians and bands are the full range across processes,
+which \cref{app:correctness} traces to reduction order. In every panel the
+graph-replayed curve sits lowest, and the lower per-iteration cost translates
+directly into time. \Cref{tab:ttt} shows GPU-CFR reaching thresholds of 10, 3 and 1.5
+times Kim's 30\,s exploitability \tttRatioMin--\tttRatioMax$\times$ sooner, with
+disjoint bootstrap intervals. Kuhn and Dark Hex (converged within milliseconds) and
+LiteEFG's Battleship trace (accessor stuck near $10^{-15}$) are omitted.
+
+\Cref{tab:ttt} reports, for the matched GPU-CFR versus Kim pair of \cref{fig:curves},
+the distribution over independent processes of the estimated wall-clock at which each
+process first crosses a fixed exploitability. Thresholds are 10, 3 and 1.5 times Kim's
+30\,s median exploitability; times are read off each trace by log-log interpolation between the
+bracketing checkpoints, and the intervals are 10{,}000-resample bootstraps over ten
+processes. The CPU column reports the median crossing time over ten independent
+processes of the same compiled solver on eight threads.
+\input{figures/TABLE_T13_ttt.tex}
+
+\paragraph{Update rule and update order.}
+\label{sec:rules}
+The rules differ only in how the two accumulators evolve. CFR$^{+}$
+\cite{tammelin2014solving} clamps accumulated regrets at zero after each update and
+weights the strategy average linearly by iteration index. DCFR
+\cite{brown2019solving} instead discounts the accumulators: positive and negative
+regrets decay at separate iteration-indexed rates, and the strategy average decays
+polynomially. Predictive CFR$^{+}$ (PCFR$^{+}$) \cite{farina2021faster} keeps the
+CFR$^{+}$ regret update but matches the strategy against the accumulated regret plus
+the current instantaneous regret as a predictor. Under \emph{simultaneous} updates
+both players' regrets are computed from one strategy profile; under
+\emph{alternating} updates the first player's update is visible to the second
+player's update in the same sweep \cite{burch2019revisiting}.
+
+The compiled engine supports these four rules under both update orders, allowing one
+execution path to expose their convergence behavior. The full grid has 96 cells. At
+equal reported iteration counts, alternating updates are tighter in 44 of the 48
+game/rule comparisons; the four exceptions are on Dark Hex, where both orders are
+within $1.3\times10^{-6}$ of zero. After charging alternating for its approximately
+two player updates, it remains better in 41 of 48 cells. The timing matrix therefore fixes
+one common update order, while this study measures the algorithmic effect of
+changing it.
+
+Update order also changes which rule leads. PCFR$^{+}$ is tightest on eleven of the
+twelve games under simultaneous updates, with DCFR leading only on Dark Hex. Under
+alternating updates, PCFR$^{+}$ leads six games and DCFR the other six. The interaction shows that the compiler
+supports a family of CFR updates without making the systems result depend on one
+preferred rule. \Cref{sec:convergence} checks the ranking against LiteEFG and OpenSpiel.
+
+\input{figures/TABLE_T9_convergence.tex}
+
+\paragraph{Repeated solves of one tree.}
+\label{sec:hunl}
+\Cref{tab:lifecycle,tab:overhead} break the HUNL turn tree into setup and per-solve
+phases. Building and compiling the specification dominates, graph capture is an order
+of magnitude cheaper, and each later 1{,}000-iteration solve is subsecond. Setup is
+repaid within the first solve. The \turnFirstSolveSec\,s from specification to
+solution is below the \turnKimThousandSec\,s of Kim's A100 implementation and the
+\turnLiteThousandSec\,s of LiteEFG for the same 1{,}000 iterations
+(\cref{tab:matrix}).
+
+The export mechanism extends the comparison to Libratus endgame~4
+\cite{brown2018superhuman,steinberger2019pokerrl} at full range. This game has
+96{,}159 Infosets on a tree of 36 million states that is almost entirely terminal
+(\cref{tab:sg4threeway}). At matched iteration counts GPU-CFR is $870\times$ faster
+than LiteEFG, which inverts the small-scale C++ advantage. Kim's sequence-form path
+is slightly faster here, because a terminal-heavy tree leaves little depth-dependent
+work for the compiled schedule to remove. The three backends agree on the value to $2.5$ chips
+(\cref{app:libratus}).
+\input{figures/TABLE_T8_sg4threeway.tex}

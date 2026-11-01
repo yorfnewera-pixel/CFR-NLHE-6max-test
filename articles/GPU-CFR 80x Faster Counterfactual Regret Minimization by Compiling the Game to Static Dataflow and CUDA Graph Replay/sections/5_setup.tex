@@ -1,0 +1,50 @@
+\section{Experimental Setup}
+\label{sec:setup}
+
+\paragraph{Three evaluation suites.}
+Each suite answers a different experimental question. The \emph{eight-game main
+timing/regression suite} in \cref{tab:suite} contains six public games via OpenSpiel
+\cite{lanctot2019openspiel} and two native HUNL-style subgames
+\cite{ganzfried2015endgame,brown2017safe} (\cref{app:hunl}). The suite spans 54 to
+275{,}983 Infosets and supports the headline timing, operation-count, and
+reference-parity results. The \emph{twelve-game update-rule suite} adds four more
+OpenSpiel games for the four-rule, two-order CPU study of \cref{tab:convergence}. The
+\emph{extended poker suite} contains the released Libratus river endgames \cite{brown2018superhuman,steinberger2019pokerrl} and larger
+exported poker instances of the head-to-head in \cref{app:libratus}.
+
+\input{figures/TABLE_T1_suite.tex}
+% The ladder/scaling figure* is sourced here (not in sec 7.2 where it is
+% discussed) so the double-column float can land on the same page as the
+% suite table; a double float cannot enter a page that has already begun.
+
+
+\paragraph{Backends.}
+\emph{GPU-CFR} runs the compiled float32 solver on one NVIDIA A100 80GB in eager or
+CUDA Graph mode. The two modes differ only in dispatch, and a vanilla CFR arm isolates
+the engine from regret matching$^{+}$. \emph{Ours CPU} runs the same compiled tensor dataflow on eight threads
+pinned to dedicated physical cores, with parallelism supplied by PyTorch's
+intra-operator pool \cite{paszke2019pytorch}. \emph{LiteEFG} 0.1.5 \cite{liu2024liteefg} uses a single-threaded C++ backend. The
+main matrix uses its simultaneous vanilla CFR mode, and \cref{app:extra} reports its
+alternating CFR$^{+}$ preset. \emph{Kim (2026)}~\cite{kim2026parallelizing},
+released as \texttt{noregret}, executes sequence-form
+\cite{koller1997representations} CFR through CuPy sparse products on the same A100. The main matrix matches its update order
+to GPU-CFR's simultaneous updates and reports its GPU backend. \emph{OpenSpiel} \cite{lanctot2019openspiel} contributes its Python CFR
+implementation and exact best response. Every backend reports exploitability as NashConv$/2$. \Cref{tab:semantics} lists
+the rule, update order, averaging, precision, and execution mode per arm.
+
+\paragraph{Shared game representations.}
+Public games are instantiated through OpenSpiel and converted to each backend's input
+format. For the HUNL-style subgames and Libratus endgames, we export the compiled
+intermediate representation to LiteEFG's generic extensive-form text format and load
+the same checksummed tree through the Kim adapter. Structural counts and small-game behavior are checked across conversions
+(\cref{app:protocol}), and \cref{app:libratus} reports the poker value-agreement
+certificate.
+
+\paragraph{Protocol.}
+Timing rows run 1{,}000 CFR$^{+}$ iterations. OpenSpiel runs 200 CFR iterations and
+is reported per iteration. GPU steady-state measurements use CUDA events \cite{guide2020cuda} after 50
+warmup iterations. Graph capture and tree construction are measured separately, while
+training-call rows include all work after solver construction. Each cell runs in an
+independent low-load process, and tables report
+medians over repeated runs. \Cref{app:protocol,app:correctness} gives the software
+stack, repetition counts, load controls, and run-level traceability.

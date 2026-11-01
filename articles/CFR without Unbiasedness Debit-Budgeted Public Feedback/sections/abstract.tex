@@ -1,0 +1,21 @@
+At a finite public-chance cut, partial counterfactual regret minimization (CFR)
+can evaluate successive outcome batches at learner states changed by earlier
+batches.  Balanced coverage then lacks the conditional unbiasedness used by
+Monte Carlo CFR analyses.  We introduce \emph{target debit}, the one-sided
+cumulative underestimation needed to transfer regret on delivered feedback to
+the dense target game.  Our central theorem bounds weighted exploitability by
+delivered-row regret, target debit, and a native alternating-update correction.
+This yields Debit-Budgeted CFR (DB-CFR), which selects a public plan from
+completed history, executes it once, and settles its debit afterward.  Complete
+coverage has zero debit and supplies exact recovery.  With at most $\ell$
+unsettled blocks, hidden debit is bounded by the sum of the $\ell$ largest
+predictable block envelopes; for fixed $\ell$ and polynomial output weights,
+the resulting $O(T^{-1})$ term preserves the additive-RM/RM+ rate.  A finite
+converse gives equal-metadata plans with charges $0$ and $11/8$, proving that a
+nontrivial strict-budget decision requires semantic information or bounded
+post-execution settlement.  In two released heads-up no-limit hold'em turn
+endgames, all 42 registered shallow comparisons favor partial coverage before
+complete coverage overtakes it between 32 and 64 rounds.  In public Leduc, a
+lagged rule fixed on four development orders beats the best
+matched-recurrence-work fixed width on all ten unseen orders (median NashConv
+gain $0.0456$) without future candidate replay.

@@ -1,0 +1,104 @@
+\section{Correctness Test Inventory}
+\label{app:correctness}
+
+The implementation is verified in layers: regression comparisons pin the optimized
+path to the reference iterates, independent solvers and exact best responses check
+computed values, and analytic poker cases check the evaluator. The suite contains
+499 tests; the ones that pin the claims of this paper are:
+
+\paragraph{Reference-oracle parity.}
+The complete pre-optimization solver loop is preserved verbatim inside the test suite
+as an oracle. Parity tests run 30 iterations on Kuhn, a mid-sized chance-heavy
+synthetic game, and reduced HUNL turn/river instances, across
+$\{$CFR, CFR$^{+}\} \times \{$uniform, linear$\}$ averaging, and assert agreement at
+float64 \texttt{atol}$=10^{-12}$, \texttt{rtol}$=0$ on CPU (float32 on CUDA at
+$10^{-9}$). Separately, the operation-count harness (\cref{tab:suite}) steps both
+implementations 22 iterations in float32 on all eight full-size games and asserts the
+maximum absolute regret difference is exactly $0.0$.
+
+\paragraph{Independent reference solver.}
+A per-node Python solver sharing no code with the compiled path (different traversal,
+different data structures) must agree on 5-iteration solves of the HUNL instances to
+$10^{-9}$.
+
+\paragraph{Structural invariants.}
+The dual-lane reach buffer's overwrite-coverage property (the union of all forward
+scatter destinations equals every non-root slot in both lanes exactly once) is
+asserted directly, as is bitwise equality between split and monolithic
+\texttt{step()} batching, and safe behavior on degenerate games (root-terminal,
+all-chance).
+
+\paragraph{CUDA-graph path.}
+Graph-vs-eager parity over 30 iterations across two games and all four
+variant/averaging combinations ($10^{-9}$, and measured bitwise on Kuhn); warmup
+accounting across split step calls (e.g., $2+8+3$ iterations equals $13$); zero-step
+no-op; capture-failure fallback (injected constructor failure must warn exactly once
+and produce eager-identical results); and buffer-rebinding detection (replacing any
+persistent tensor after capture must raise an error before any replay).
+
+\paragraph{Seed-invariance audit.}
+Because we report medians over repetitions that differ only in a recorded seed, we
+verify directly that the seed does nothing. For each game and device, 20 runs at a
+fixed seed are interleaved with 4 runs at distinct seeds, and every pair of runs is
+compared by maximum absolute deviation over the regret and average-strategy tensors.
+On CPU the reduction order is fixed and every one of the $\binom{24}{2}$ pairs is
+exactly zero. On GPU the reductions are unordered, so bitwise equality is
+unavailable and the two arms are compared as distributions instead: relabelling
+which runs form the same-seed arm gives an exact permutation null for the difference
+between the median cross-seed and the median same-seed pairwise deviation, over all
+$\binom{24}{20} = 10{,}626$ relabelings, holding both the pair-count split
+and the dependence between pairs (they share runs) fixed. All eight games pass at
+$\alpha = 0.05$, with minimum $p = 0.15$.
+
+A max-versus-max comparison would not do here, and the failure is instructive. Our
+first version of this audit gated on the cross-seed pairwise max not exceeding the
+same-seed pairwise max, with 5 same-seed
+and 4 cross-seed runs, comparing a maximum over $5 \times 4 = 20$ pairs against a
+maximum over $\binom{5}{2} = 10$ pairs. A maximum grows with the number of draws, so
+under a true null the larger collection wins with probability $20/30 = 2/3$; the
+criterion rejected 4 of the 8 games and would have done so on any deterministic
+solver with nonzero float noise. The permutation test replaces it.
+
+The audit also settles the near-indifference bifurcation of \cref{sec:correctness}
+as reduction-order noise, on two independent grounds:
+the second exploitability cluster ($0.17314$, against $0.17213$ for the main
+cluster) appears 4 times among the 20 \emph{same-seed} river runs and once among
+the 4 cross-seed runs, and the same-seed and cross-seed pairwise maxima agree to
+seven significant figures ($18949.053$ against $18949.052$ on the unnormalized
+regret tensors).
+
+\paragraph{How far reduction-order noise propagates.}
+The audit above shows the seed is inert; this one bounds what the reduction order costs.
+We ran the shipped solver eight times per cell over four update rules $\times$ two
+update orders on Leduc and the HUNL river subgame, holding the seed fixed, and recorded
+the spread of final exploitability as a fraction of the cell's median. At the main
+protocol ($T{=}1000$, float32) no cell reproduces bitwise; the spread runs from $0.004\%$
+(river, PCFR$^{+}$, alternating) to $65\%$ (Leduc, vanilla CFR, simultaneous), with a
+median of $3.5\%$ over the sixteen cells. Precision and iteration count do not tame it:
+at $T{=}8000$ in float64 on Leduc the median spread is $31\%$ and vanilla CFR under
+simultaneous updates spreads $149\%$, because a longer run gives an early divergence more
+iterations to compound. Regret matching$^{+}$ is the amplifier. It clamps at zero and
+renormalizes, so two runs that disagree in the last bit of a regret near the clamp
+produce different supports at the next iteration, a discrete change in the
+strategy vector.
+
+This is why \cref{tab:convergence} is measured on the CPU, where the reduction order is
+fixed and repeated runs agree to the last bit, which the test suite asserts for all four
+rules under both orders on the regret tensor, the strategy average, and the resulting
+exploitability. Comparing update rules on the GPU would
+require enough repetitions per cell to separate medians that sit closer together than
+the within-cell spread. The wall-clock measurements are unaffected: per-iteration time
+is a property of the executed kernel sequence, which the CUDA graph fixes, and it moves
+by less than $2\%$ across the load range we logged.
+
+\paragraph{Performance gates (load-immune).}
+Per-iteration Aten operation counts are asserted under the bound
+$40 + 10 \times \mathrm{blocks}$ with block counts equal to tree depth levels, using a
+dispatch-interception counter; these tests are deterministic regardless of machine
+load and act as the performance regression gate of \cref{sec:correctness}.
+
+\paragraph{Evaluator and game-level checks.}
+The generic best-response evaluator is validated against a recursive oracle (itself
+checked by brute-force pure-strategy enumeration on reduced games), the analytic
+anchors of \cref{app:hunl}, and known values (e.g., Dark Hex 2$\times$2 first-player
+win, $v_0 = +1$, with exploitability $\to 0$ under both variants).

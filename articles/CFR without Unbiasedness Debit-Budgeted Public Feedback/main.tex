@@ -1,0 +1,81 @@
+\def\PUBLICPREPRINT{1}
+
+\documentclass{article}
+
+\usepackage{iclr2027_conference,times}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{float}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning,decorations.pathreplacing}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+
+\newif\ifpublicpreprint
+\ifdefined\PUBLICPREPRINT
+  \publicpreprinttrue
+\else
+  \publicpreprintfalse
+\fi
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+\newtheorem{definition}{Definition}
+
+\newcommand{\one}{\mathbf 1}
+\newcommand{\ind}[1]{\mathbf 1\{#1\}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\pos}[1]{\left[#1\right]_+}
+
+\title{CFR without Unbiasedness:\\
+Debit-Budgeted Public Feedback}
+
+\ifpublicpreprint
+  \author{
+    Jiaxing Guo\\
+    Imperial College London\\
+    \texttt{henry.guo23@imperial.ac.uk}
+    \And
+    Lei Ye\\
+    Imperial College London\\
+    \texttt{kevin.ye23@imperial.ac.uk}
+  }
+  \iclrfinalcopy
+\else
+  \author{Anonymous authors}
+\fi
+
+\begin{document}
+
+\maketitle
+\ifpublicpreprint
+  \lhead{Preprint}
+\fi
+
+\begin{abstract}
+\input{sections/abstract}
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/background}
+\input{sections/theory}
+\input{sections/method}
+\input{sections/experiments}
+\input{sections/related_work}
+\input{sections/conclusion}
+
+\bibliography{references}
+\bibliographystyle{iclr2027_conference}
+
+\appendix
+\input{appendix_related_work}
+\input{appendix}
+
+\end{document}

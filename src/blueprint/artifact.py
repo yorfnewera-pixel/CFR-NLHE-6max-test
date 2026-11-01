@@ -1,0 +1,413 @@
+"""Portable, hash-pinned blueprint checkpoints and observation-only play."""
+
+from dataclasses import asdict
+from gzip import GzipFile, compress, decompress
+from gzip import open as gzip_open
+from hashlib import sha256
+from io import TextIOWrapper
+from json import dumps, loads
+from math import isfinite
+from os import fsync, replace
+from pathlib import Path
+from random import Random
+
+from src.blueprint.abstraction import (
+    SCHEMA,
+    HU20_SCHEMA,
+    HU20_UNCAPPED_SCHEMA,
+    HU20_COMPRESSED_SCHEMA,
+    HU20_COMPRESSED_SCHEMAS,
+    HU20_CARD_V2_SCHEMAS,
+    NATIVE_SCHEMAS,
+    EQUITY_SCHEMAS,
+    HU100_EQUITY_SCHEMA, HU200_EQUITY_SCHEMA,
+    HU100_SCHEMA,
+    HU200_SCHEMA,
+    HU100_MENU_VERSION,
+    HU200_MENU_VERSION,
+    MENU_V2_SCHEMAS,
+    MENU_V2_VERSIONS,
+    menu_sizes,
+    STACK_BY_SCHEMA,
+    HU20_HISTORY_VERSION,
+    HU20_UNCAPPED_MENU_VERSION,
+    TP20_SCHEMA,
+    TP20_MENU_VERSION,
+    SHORTSTACK_SEATS,
+    HU20_MENU_VERSION,
+    HU20_CARD_VERSION,
+    SUPPORTED_SCHEMAS,
+    choices,
+    information_key,
+)
+from src.blueprint.solver import (
+    FORMAT,
+    HU20_GAME,
+    HU20_UNCAPPED_GAME,
+    HU100_GAME,
+    HU200_GAME,
+    TP20_GAME,
+    SHORTSTACK_GAMES,
+    LEGACY_GAME,
+    BlueprintTrainer,
+    Node,
+    PilotConfig,
+    regret_match,
+)
+from src.game.hand import Table
+
+HU20_FORMAT = "holdem-hu20-blueprint-v2"
+HU20_UNCAPPED_FORMAT = "holdem-hu20-native-reopening-blueprint-v1"
+
+
+HU100_FORMAT = "holdem-hu100-native-reopening-blueprint-v1"
+HU200_FORMAT = "holdem-hu200-native-reopening-blueprint-v1"
+TP20_FORMAT = "holdem-tp20-blueprint-v1"
+SHORTSTACK_FORMATS = {HU20_GAME: HU20_FORMAT, HU20_UNCAPPED_GAME: HU20_UNCAPPED_FORMAT, TP20_GAME: TP20_FORMAT}
+
+SHORTSTACK_FORMATS[HU100_GAME] = HU100_FORMAT
+SHORTSTACK_FORMATS[HU200_GAME] = HU200_FORMAT
+
+
+def _format(config: PilotConfig) -> str:
+    return SHORTSTACK_FORMATS.get(config.game, FORMAT)
+
+
+def _identity(config: PilotConfig) -> dict:
+    seats = SHORTSTACK_SEATS.get(config.abstraction)
+    identity = ({"game": config.game, "players": seats, "stacks": [STACK_BY_SCHEMA[config.abstraction]] * seats,
+             "small_blind": 50, "big_blind": 100,
+             "action_menu": (MENU_V2_VERSIONS[STACK_BY_SCHEMA[config.abstraction] // 100]
+                             if config.abstraction in MENU_V2_SCHEMAS else
+                             HU200_MENU_VERSION if config.abstraction in (HU200_SCHEMA, HU200_EQUITY_SCHEMA) else
+                             HU100_MENU_VERSION if config.abstraction in (HU100_SCHEMA, HU100_EQUITY_SCHEMA) else
+                             HU20_UNCAPPED_MENU_VERSION if config.abstraction in NATIVE_SCHEMAS else
+                             HU20_MENU_VERSION if seats == 2 else TP20_MENU_VERSION),
+             "card_descriptor": HU20_CARD_VERSION} if seats else {})
+    if config.abstraction in HU20_CARD_V2_SCHEMAS:
+        from src.blueprint.cards_v2 import VERSION
+        identity["card_descriptor"] = VERSION
+    if config.abstraction in NATIVE_SCHEMAS:
+        identity["raise_cap_semantics"] = "none; native minimum-raise/reopening/stack bounds"
+    if config.abstraction in HU20_COMPRESSED_SCHEMAS:
+        identity["history_descriptor"] = HU20_HISTORY_VERSION
+    if config.abstraction in EQUITY_SCHEMAS:
+        from src.blueprint.equity_buckets import EQUITY_K50_SHA256
+        identity.update(card_descriptor="equity-histogram-k50-v1", card_tables=dict(EQUITY_K50_SHA256))
+    return identity
+
+
+def _encoded(document: dict) -> bytes:
+    return compress(
+        dumps(
+            document, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode(),
+        mtime=0,
+    )
+
+
+def _write(path: Path, document: dict) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = _encoded(document)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_bytes(data)
+    replace(temporary, path)
+    return sha256(data).hexdigest()
+
+
+def _read(path: Path) -> dict:
+    document = loads(decompress(path.read_bytes()))
+    if (
+        not isinstance(document, dict)
+        or document.get("format") not in (FORMAT, *SHORTSTACK_FORMATS.values())
+    ):
+        raise ValueError("Unknown blueprint artifact format")
+    _checked_schema(document)
+    return document
+
+
+def _checked_schema(document: dict) -> str:
+    schema = document.get("abstraction")
+    config = document.get("config")
+    if (
+        schema not in SUPPORTED_SCHEMAS
+        or not isinstance(config, dict)
+        or config.get("abstraction", SCHEMA) != schema
+        or document.get("format") != SHORTSTACK_FORMATS.get(
+            SHORTSTACK_GAMES.get(schema), FORMAT)
+        or config.get("game", LEGACY_GAME) !=
+            SHORTSTACK_GAMES.get(schema, LEGACY_GAME)
+        or (schema in SHORTSTACK_SEATS and document.get("identity") !=
+            _identity(PilotConfig(**config)))
+    ):
+        raise ValueError("Unknown blueprint abstraction schema")
+    return schema
+
+
+def _config(config: PilotConfig) -> dict:
+    document = asdict(config)
+    if config.abstraction == SCHEMA:
+        # Keep existing v1 checkpoint and export bytes reproducible.
+        del document["abstraction"]
+    if config.postflop_replicates == 1:
+        # Older checkpoints did not record this optional sampling mode.
+        del document["postflop_replicates"]
+    if config.game == LEGACY_GAME:
+        del document["game"]
+    return document
+
+
+def _table(table: Table) -> dict:
+    return {
+        "player_ids": table.player_ids,
+        "stacks": table.stacks,
+        "button": table.button,
+        "small_blind": table.small_blind,
+        "big_blind": table.big_blind,
+        "chip_unit": table.chip_unit,
+    }
+
+
+def save_training(trainer: BlueprintTrainer, path: Path) -> str:
+    if getattr(trainer, "evaluation_only", False):
+        raise ValueError("Evaluation-only checkpoints must be saved/exported by the native trainer")
+    header = {
+        "format": _format(trainer.config),
+        "abstraction": trainer.config.abstraction,
+        "kind": "training",
+        "checkpoint_format": "jsonl-v2",
+        "table": _table(trainer.table),
+        "config": _config(trainer.config),
+        "iteration": trainer.iteration,
+    }
+    if trainer.config.game in SHORTSTACK_FORMATS:
+        header["identity"] = _identity(trainer.config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("wb") as raw:
+        with (
+            GzipFile(fileobj=raw, mode="wb", mtime=0, filename="") as zipped,
+            TextIOWrapper(zipped, encoding="utf-8") as output,
+        ):
+            output.write(dumps(header, sort_keys=True, separators=(",", ":")) + "\n")
+            for key in sorted(trainer.nodes):
+                node = trainer.nodes[key]
+                output.write(
+                    dumps(
+                        [key, node.names, node.regrets, node.average, node.visits],
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                    + "\n"
+                )
+        raw.flush()
+        fsync(raw.fileno())
+    replace(temporary, path)
+    digest = sha256()
+    with path.open("rb") as saved:
+        for chunk in iter(lambda: saved.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_training(path: Path, *, card_buckets: Path | None = None, evaluation_only: bool = False) -> BlueprintTrainer:
+    """K50 checkpoints are read-only in Python; native owns their training recipe."""
+    with gzip_open(path, "rt", encoding="utf-8") as source:
+        document = loads(source.readline())
+        if (
+            not isinstance(document, dict)
+            or document.get("format") not in (FORMAT, *SHORTSTACK_FORMATS.values())
+        ):
+            raise ValueError("Unknown blueprint artifact format")
+        schema = _checked_schema(document)
+        from src.blueprint.equity_buckets import load_cards
+        cards = load_cards(schema, document.get("identity", {}), card_buckets)
+        if document.get("checkpoint_format") == "jsonl-v2":
+            rows = (loads(line) for line in source)
+        elif "checkpoint_format" not in document:
+            rows = (
+                ([key, *row] for key, row in document["nodes"].items())
+                if document.get("kind") == "training"
+                else ()
+            )
+        else:
+            raise ValueError("Unknown blueprint checkpoint format")
+        trainer = _load_training_document(document, rows, evaluation_only=evaluation_only or schema in EQUITY_SCHEMAS or "frozen_table" in document)
+        trainer.equity_cards = cards
+        return trainer
+
+
+def _load_training_document(document: dict, rows, *, evaluation_only=False) -> BlueprintTrainer:
+    if document.get("kind") != "training":
+        raise ValueError("An inference export cannot resume training")
+    rule = document.get("average_rule", "traverser-reach")
+    if rule not in ("traverser-reach", "opponent-sampled"):
+        raise ValueError("Unknown stored average rule")
+    if not evaluation_only and rule != "traverser-reach":
+        # Continuing here would add this trainer's traverser-reach increments to it.
+        raise ValueError("Only traverser-reach average checkpoints can resume in Python")
+    if not evaluation_only and "training_options" in document:
+        # Python implements only the production update; native options (regret floor, DCFR) cannot continue here.
+        raise ValueError("Checkpoints trained with native options cannot resume in Python")
+    table_data = document["table"]
+    table = Table(
+        tuple(table_data["player_ids"]),
+        tuple(table_data["stacks"]),
+        table_data["button"],
+        table_data["small_blind"],
+        table_data["big_blind"],
+        table_data["chip_unit"],
+    )
+    trainer = BlueprintTrainer(table, PilotConfig(**document["config"]))
+    iteration = document["iteration"]
+    if type(iteration) is not int or iteration < 0:
+        raise ValueError("Invalid blueprint iteration")
+    trainer.iteration = iteration
+    trainer.evaluation_only = evaluation_only
+    trainer.average_rule = rule
+    for key, names, regrets, average, visits in rows:
+        if (
+            not isinstance(key, str)
+            or len(key) != 32
+            or len(names) == 0
+            or len(names) != len(regrets)
+            or len(names) != len(average)
+            or len(set(names)) != len(names)
+            or not all(isfinite(x) for x in (*regrets, *average))
+            or type(visits) is not int
+            or visits < 0
+        ):
+            raise ValueError("Invalid blueprint node")
+        if key in trainer.nodes or any(c not in "0123456789abcdef" for c in key) or any(x < 0 for x in average):
+            raise ValueError("Invalid or duplicate blueprint node")
+        trainer.nodes[key] = Node(tuple(names), list(regrets), list(average), visits)
+    if len(trainer.nodes) > trainer.config.max_entries:
+        raise ValueError("Blueprint checkpoint exceeds its entry cap")
+    return trainer
+
+
+def export_policy(
+    trainer: BlueprintTrainer, path: Path, *, strategy: str = "current"
+) -> str:
+    if strategy not in {"current", "average"}:
+        raise ValueError("Export current or average strategy")
+    if trainer.config.game in SHORTSTACK_FORMATS and strategy != "current":
+        raise ValueError("Short-stack games require current export or a separately collected windowed extraction")
+    entries = {}
+    for key, node in trainer.nodes.items():
+        if strategy == "current":
+            probabilities = regret_match(tuple(node.regrets))
+        else:
+            total = sum(node.average)
+            probabilities = (
+                tuple(value / total for value in node.average)
+                if total > 0
+                else (1 / len(node.names),) * len(node.names)
+            )
+        entries[key] = [node.names, probabilities]
+    document = {
+            "format": _format(trainer.config),
+            "abstraction": trainer.config.abstraction,
+            "kind": "inference",
+            "table": _table(trainer.table),
+            "config": _config(trainer.config),
+            "iteration": trainer.iteration,
+            "strategy": strategy,
+            "entries": entries,
+        }
+    if trainer.config.game in SHORTSTACK_FORMATS:
+        document["identity"] = _identity(trainer.config)
+    return _write(
+        path,
+        document,
+    )
+
+
+def _checked_policy_node(key, names, probabilities):
+    if (
+        not isinstance(key, str)
+        or len(key) != 32
+        or len(names) != len(probabilities)
+        or len(names) == 0
+        or len(set(names)) != len(names)
+        or not all(isfinite(p) and p >= 0 for p in probabilities)
+        or abs(sum(probabilities) - 1) > 1e-8
+    ):
+        raise ValueError("Invalid blueprint policy node")
+
+
+class FrozenBlueprint:
+    def __init__(self, spec, path: Path, *, card_buckets: Path | None = None):
+        self.spec = spec
+        self.data = path.read_bytes()
+        if sha256(self.data).hexdigest() != spec.sha256:
+            raise ValueError("Blueprint export hash mismatch")
+        document = _read(path)
+        from src.blueprint.equity_buckets import load_cards
+        self.equity_cards = load_cards(document["abstraction"], document.get("identity", {}), card_buckets)
+        declared = getattr(spec, "abstraction", None)
+        if declared is not None and declared != document["abstraction"]:
+            raise ValueError("Declared blueprint abstraction differs")
+        if document.get("kind") != "inference":
+            raise ValueError("Training checkpoints are not arena policies")
+        if spec.format != document["format"]:
+            raise ValueError("Checkpoint adapter format differs from inference artifact")
+        if document["format"] in SHORTSTACK_FORMATS.values():
+            table_data = document["table"]
+            table = Table(tuple(table_data["player_ids"]), tuple(table_data["stacks"]),
+                          table_data["button"], table_data["small_blind"],
+                          table_data["big_blind"], table_data["chip_unit"])
+            BlueprintTrainer(table, PilotConfig(**document["config"]))
+        self.players = len(document["table"]["stacks"])
+        self.raise_cap = document["config"]["raise_cap"]
+        self.abstraction = document["abstraction"]
+        self.game = document["config"].get("game", LEGACY_GAME)
+        self.identity = document.get("identity", {})
+        self.entries = {}
+        for key, row in document["entries"].items():
+            names, probabilities = row
+            _checked_policy_node(key, names, probabilities)
+            self.entries[key] = (tuple(names), tuple(probabilities))
+        self.description = {
+            "kind": document["format"],
+            "weights_sha256": spec.sha256,
+            "num_players": self.players,
+            "iteration": document["iteration"],
+            "training_seed": document["config"]["seed"],
+            "strategy": document["strategy"],
+            "abstraction": self.abstraction,
+            "entries": len(self.entries),
+        }
+
+    def policy(self, seed: int):
+        return _Player(self, seed)
+
+    def information_key(self, view, menu):
+        """The policy owns its schema and tables; process registration cannot change it."""
+        return information_key(view, menu, schema=self.abstraction,
+                               equity_cards=getattr(self, "equity_cards", None))
+
+    def distribution(self, view):
+        if view.capacity != self.players:
+            raise ValueError("Blueprint table size differs from the evaluation table")
+        menu = choices(view, raise_cap=self.raise_cap,
+                       free_fold=self.abstraction not in SHORTSTACK_SEATS,
+                       menu_sizes=menu_sizes(self.abstraction))
+        key = self.information_key(view, menu)
+        saved = self.entries.get(key)
+        if saved is None:
+            return menu, (1 / len(menu),) * len(menu), False
+        names, probabilities = saved
+        if names != tuple(item.name for item in menu):
+            raise ValueError("Blueprint action labels differ from the observation")
+        return menu, probabilities, True
+
+
+class _Player:
+    def __init__(self, blueprint: FrozenBlueprint, seed: int):
+        self.blueprint = blueprint
+        self.random = Random(seed)
+
+    def choose_action(self, view):
+        menu, probabilities, _ = self.blueprint.distribution(view)
+        return self.random.choices(menu, weights=probabilities, k=1)[0].action

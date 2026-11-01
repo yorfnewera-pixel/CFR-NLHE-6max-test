@@ -1,0 +1,98 @@
+\section{Kernel-Level Profile and Alternative Execution Models}
+\label{app:profile}
+
+This appendix opens the iteration with the vendor profilers and measures the
+execution models a systems reader would propose in place of graph replay: more
+iterations per graph, a generic tensor compiler, more CPU cores, and graph capture
+of the prior GPU baseline.
+
+\paragraph{What one iteration launches.}
+\cref{tab:profile} traces 100 steady-state iterations with Nsight Systems inside an
+NVTX window, in eager and graph mode, and replays two eager iterations under Nsight
+Compute. The Aten operation count of \cref{tab:suite} is close to, but not the same
+as, the kernel count: on the turn subgame 96 operations become 87 kernels (some
+operations dispatch no kernel, a few dispatch two), and the graph path replays the
+same kernels plus the device-resident counter update. Eager execution submits 87
+host launches per iteration and keeps a kernel resident on the GPU for under half of
+the window even with the tracer's own launch overhead inflating the iteration. Graph
+replay issues one graph launch per iteration; the two further host launches per
+iteration in \cref{tab:profile} are the fill kernels with which PyTorch's
+\texttt{CUDAGraph.replay()} refreshes its random-number state on every replay, a
+framework fixture the solver never reads, and the three extra kernels inside the
+graph are those two fills plus the device-side iteration-counter increment. GPU
+residency rises above 90\%. The remaining time is kernel execution: 87 kernels averaging under
+5\,$\mu$s each, dominated by the gather kernels of the forward and backward passes
+(38 per iteration, 58\% of GPU time), then the scatter and \texttt{index\_add}
+kernels of the regret and strategy accumulation. Half of the kernels launch fewer
+blocks than the A100 has SMs, so the device is latency bound on small grids rather
+than throughput bound: the counters put DRAM traffic at 129\,MB per iteration, which
+at the unprofiled 0.397\,ms is about 17\% of peak bandwidth averaged over the
+iteration and 9\% time-weighted inside kernels, and SM throughput at 5\% of peak.
+The bytes-moved model behind \cref{fig:scaling} counts only the solver's own
+arrays and therefore reports a lower bound on this traffic.
+
+\paragraph{More iterations per graph.}
+Because the iteration counter advances on the device, any number of iterations can
+be recorded into one graph (\cref{sec:cudagraph}). \cref{tab:altexec} records 1, 10,
+and 100 iterations per graph: the per-iteration time is unchanged within
+measurement noise on all three games. A graph launch costs a few microseconds
+against a 0.304--0.557\,ms body, so the single-iteration graph already captures the
+whole launch-amortization benefit, and the remaining cost is kernel execution.
+
+\paragraph{A generic compiler on the same dataflow.}
+\cref{tab:altexec} also re-measures the ladder under PyTorch 2.5.1+cu121 in one
+process and wraps the compiled iteration body in \texttt{torch.compile} (Inductor),
+driven with the same device-resident counter so the trace contains no per-iteration
+Python scalars. The three ladder stages keep their PyTorch 1.13.1 ordering and magnitudes
+(19$\times$ and 1.9$\times$ against 19$\times$ and 1.6$\times$), which settles the
+framework-version question for \cref{fig:ladder}. On the turn subgame Inductor's
+\texttt{default} mode runs 11\% faster than CUDA graph replay of the uncompiled body
+(0.357 against 0.397\,ms); on the launch-bound Leduc tree it stays 1.4$\times$
+slower, and \texttt{reduce-overhead} mode (which itself captures CUDA graphs) is no
+faster in either case. The gather and scatter kernels that carry the iteration are
+not fused into fewer launches by any tested Inductor configuration, so a generic compiler recovers little beyond the launch
+amortization that graph replay already provides. It does so at a price the graph
+path does not pay: the first call compiles for seconds (4.025--4.747\,s on the turn
+subgame), and the compiled floats differ from the eager iterates because Inductor
+reorders reductions, whereas graph replay runs the identical kernels in the
+identical order. The game-level compilation of
+\cref{sec:method} is what turns the tree walk into this flat dataflow in the first
+place; the generic compiler can only consume the result.
+
+\paragraph{Graph capture of the prior GPU baseline.}
+Kim (2026)'s iteration cannot be captured. Its CuPy sparse products call cuSPARSE,
+which CuPy refuses to execute under stream capture, and its per-level row slicing,
+CSR index assignment, and boolean gathers each perform a host-to-device transfer per
+iteration that capture forbids. We verified both on a Kuhn-sized instance:
+\texttt{cupy.cuda.Stream.begin\_capture} raises on the first sparse product. The
+representation is what makes the iteration capturable.
+
+\paragraph{CPU thread scaling.}
+\cref{fig:cpuscaling} (\cref{sec:results}) sweeps the compiled CPU solver from 1 to 28 threads pinned to
+whole physical cores of one socket on the four largest games. Throughput saturates
+well below the core count: the 8-thread arm of \cref{tab:matrix} sits within a
+small factor of the 28-thread point on every game, because each depth block is a
+gather or scatter over a few hundred thousand elements that PyTorch's intra-operator
+pool cannot split efficiently. The 8-thread arm is therefore a representative CPU
+ceiling for this dataflow.
+
+
+\paragraph{Hand-fused kernels.}
+The remaining execution model is to replace the generic gather and scatter kernels
+with kernels written for this dataflow. \Cref{tab:kernels} measures a Triton
+implementation that computes one depth level of the forward or backward pass per
+launch and fuses regret matching, the regret update and the average-strategy update
+into one kernel each, so an iteration issues $2D + 5$ launches against the
+$8D + 32$ Aten operations of the generic path, the same count \cref{tab:suite} reports
+(recounted under the PyTorch 2.5 dispatcher, it is unchanged); it drives the solver's own buffers and
+index arrays and agrees with the generic path to $10^{-9}$ in float64. All four arms
+run in one process on the PyTorch 2.5 stack that ships Triton, both with and without
+graph capture, so the table separates the gain of fusion from the gain of launch
+batching and places the compiled tensor path with graph replay on that frontier. The
+compiled path keeps the property that motivates it: the same code runs every update
+rule, every game, and the CPU, from one representation and without a kernel per
+dataflow.
+
+\input{figures/TABLE_T11_profile.tex}
+\input{figures/TABLE_T12_altexec.tex}
+\input{figures/TABLE_T15_kernels.tex}

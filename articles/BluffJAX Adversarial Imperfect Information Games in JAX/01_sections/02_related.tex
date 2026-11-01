@@ -1,0 +1,34 @@
+\section{Related Works}
+\textbf{Games as AI Benchmarks.} The pursuit of superhuman game-playing abilities in AI systems has been a driving force in AI research for decades~\citep{samuel1959some, tesauro1995temporal, campbell2002deep}, and advances in deep learning have enhanced AI game-playing systems beyond the need for human expert knowledge. ~\citet{mnih2015human} is often attributed with reinvigorating deep RL research by demonstrating superhuman performance in several Atari games using Deep Q-Networks. AlphaGo~\citep{silver2016mastering}, AlphaGo Zero~\citep{silver2017mastering}, Alpha Zero ~\citep{silver2017zero}, and MuZero~\citep{schrittwieser2020mastering} were critical milestones in exhibiting the increasing abilities of deep RL and tree search to reach increasing capabilities in unsolved games like Go, Chess, and Shogi. Systems like OpenAI Five~\citep{berner2019dota}, AlphaStar~\citep{vinyals2019grandmaster}, and Cicero~\citep{meta2022human} have demonstrated the abilities of AI systems to excel in complex multi-agent settings.
+
+\textbf{Algorithms for Imperfect Information Games.} Imperfect information games fundamentally differ from perfect information games, since the existence of private information (partial observability) means that optimal performance requires reasoning over the strategies of other players. As games grow large, tabular methods such as Counterfactual Regret Minimization (CFR)~\citep{zinkevich2007regret} become unfeasible. Various methods have attempted to augment standard RL and tree search algorithms with notions of belief state probability estimation. Deep CFR~\citep{brown2019deep} replaces tabular CFR with Monte Carlo CFR (MCCFR)~\citep{burch2012efficient} for subgame sampling and neural networks to estimate instantaneous regrets. Libratus~\citep{brown2017libratus} and Pluribus~\citep{brown2019superhuman} utilize MCCFR to achieve expert-level performance in 2-player and 6-player Texas Hold'Em Poker respectively. Recursive Belief-based Learning (ReBeL)~\citep{brown2020combining} extended this notion further by leaving state abstraction behind and combining subgame deep CFR with value learning over public belief states. Neural Fictitious Self-Play (NSFP)~\citep{heinrich2016deep} uses best-response policy training with supervised average-policy mimicry from experience replay in order to train RL agents in a 2-player self-play setting, achieving decent performance in model poker games without state abstraction or tree search.
+
+\textbf{The Benefits of JAX.} Over the past few years, adoption of JAX-based training in deep RL research has led to a greater necessity for JAX-native benchmarks. One major benefit of JAX benchmarks is that environment logic can be run on the GPU directly, mitigating the overhead cost of transferring data between the CPU and GPU. The Python JAX function \mintinline{Python}{jax.vmap} allows for efficient parallelization of environments, which has been shown to effectively scale learning~\citep{gallici2024simplifying}. Finally, \mintinline{Python}{jax.jit} allows for just-in-time compilation of JAX-compatible Python functions using the XLA compiler, leading to demonstrable speedups over PyTorch-based neural network training and array logic.
+
+\textbf{Related Benchmarks.} Suites such as Gymnax~\citep{gymnax} and Jumanji~\citep{bonnet_jumanji_2024} implement well-known single-player environments into JAX and have provided researchers with familiar RL environments such as classic control games and MinAtar. Brax~\citep{freeman2021brax} implements differentiable rigid-body simulation in JAX for physics-based control, enabling faster training in robotic domains. JAXMarl~\citep{rutherford_jaxmarl_2024} implements well-studied multi-agent environments such as StarCraft II, Multi-Particle Environments, and Hanabi. MEAL~\citep{tomilin_meal_2025} presents a benchmark tailored to continual MARL by procedurally generating tasks based on the Overcooked benchmark. PGX~\citep{koyamada_pgx_2023} implements adversarial games with (mostly) perfect information in JAX, such as Chess, Go, and Hex. RLCard~\citep{zha_rlcard_2020} and PettingZoo~\citep{terry2021pettingzoo} are CPU-based suites that contain some overlapping environments with BluffJAX (e.g. Texas Hold'Em Poker). Finally, OpenSpiel~\citep{lanctot2019openspiel} is worth noting as it provides canonical implementations of several games in C++ and has been used across many works\footnote{It should be noted that some JAX code examples (e.g. CFR, DQN) are provided in the OpenSpiel library; however, the games themselves are CPU-based.}. In this work, we address an open niche in the benchmark ecosystem, since \textbf{BluffJAX specializes on JAX implementations of adversarial games with imperfect information, particularly those involving deception and signaling}. Table~\ref{tab:benchmarks} summarizes some notable attributes of BluffJAX when compared to other well-known MARL benchmarks. Note that we describe BluffJAX as \textit{mostly} adversarial because of the inclusion of team games that require collaboration within each team. Table~\ref{tab:benchmarks} comapres BluffJAX to other relevant suites, including those mentioned above as well as~\citet{ruhdorfer2024overcooked, agapiou2022melting,kurach2020google}.
+
+\begin{table}[htbp]
+    \caption{Comparison between BluffJAX and other Multi-Agent Benchmarks.}
+    \begin{center}
+        \begin{tabular}{lccllc}
+        \hline
+            Benchmark  & \makecell{GPU-\\accelerated}  &\makecell{Variable \\
+            no. agents} & \makecell{Adversarial or\\cooperative} & \makecell{Perfect or \\ Imperfect Info.}  
+            \\ \hline
+            PGX & \cmark & \xmark & Adversarial (mostly) & Perfect (mostly) \\
+            JaxMARL& \cmark & \cmark & Both & Both  \\
+            Overcooked GC & \cmark & \xmark & Cooperative & Perfect \\
+            MEAL & \cmark & \cmark & Cooperative & Both &  \\
+            VMAS  & \xmark & \cmark & Both & Imperfect \\
+            OpenSpiel & \xmark & \cmark & Both & Both  \\
+            RLCard & \xmark & \xmark & Adversarial & Imperfect  \\
+            PettingZoo & \xmark & \cmark & Both & Both  \\
+            Melting Pot 2 & \xmark & \cmark & Both & Both  \\
+            Google Football & \xmark & \cmark & Both & Both  \\
+            \hline
+            BluffJAX & \cmark & \cmark & Adversarial (mostly) & Imperfect \\
+            \hline
+        \end{tabular}
+    \end{center}
+    \label{tab:benchmarks}
+\end{table}

@@ -1,0 +1,15 @@
+\section{Related Work}
+\label{sec:related}
+
+MCCFR, Public Chance Sampling, and stochastic CFR obtain target regret from
+conditionally unbiased feedback
+\citep{lanctot2009mccfr,johanson2012pcs,farina2020stochastic}; DB-CFR instead
+controls deterministic history-coupled bias by pathwise target debit.  Lazy CFR
+skips information-set updates, while GraB and random reshuffling order smooth
+finite-sum gradients \citep{zhou2020lazy,lu2022grab,das2022withoutreplacement}.
+Delayed-feedback learning postpones the learner update
+\citep{joulani2013delay}; here only the target-validity audit is delayed.
+Persistent low-discrepancy MCCFR studies learner-specific thinning of sparse
+node streams in a concurrent submission \citep{anonymous2027amccfr}, not width
+over an explicit public cut.  Appendix~\ref{app:related-work} compares the
+interfaces in detail.

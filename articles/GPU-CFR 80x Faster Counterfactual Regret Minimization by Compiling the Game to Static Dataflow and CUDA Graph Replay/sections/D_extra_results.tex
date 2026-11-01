@@ -1,0 +1,84 @@
+\section{Additional Results}
+\label{app:extra}
+
+
+
+
+\paragraph{Solver lifecycle.}
+\cref{tab:lifecycle} decomposes a re-solve on the HUNL turn subgame and on Libratus
+endgame~4 into every phase a caller pays, from reading the specification to the
+in-place \texttt{reset()}, \texttt{set\_payoffs} and \texttt{set\_root\_ranges}
+calls that precede each solve (\cref{app:compiler}), and reports the measured
+wall-clock of 1, 2, 10 and 100 back-to-back solves that reuse one solver against the
+rebuild-per-solve model estimate.
+\input{figures/TABLE_T14_lifecycle.tex}
+
+\paragraph{Peak GPU memory.}
+\cref{tab:memory} lists peak allocated and reserved GPU memory per game for the
+1{,}000-iteration CFR$^{+}$ solve behind \cref{tab:matrix}.
+\input{figures/TABLE_T4_memory.tex}
+
+\paragraph{Timing dispersion.}
+\cref{tab:spread} reports the repetition counts and the spread each \cref{tab:matrix}
+median was taken over. Repetitions are independent processes, and both spread columns
+are independent maxima across games, relative to each game's median: the interquartile
+range and the full $\max-\min$ range. Parentheses name the range-maximizing game.
+Spread concentrates on the smallest trees, where an iteration is short enough for
+process-level noise to matter, and on the eager path, whose per-operation dispatch stays
+sensitive to host scheduling at every size. On the four largest games every other arm
+holds within $10\%$, and the graph path within $2\%$.
+\input{figures/SNIPPET_exclusions.tex}
+
+\input{figures/TABLE_T2b_spread.tex}
+
+\paragraph{Kim (2026): precision.}
+Double precision behaves as it does on GPU-CFR (\cref{sec:ladder}), for the same reason: the
+iteration is launch bound. On \texttt{leduc\_poker} and
+\texttt{liars\_dice}, float64 costs $0.999\times$ and $0.991\times$ the float32 time
+and changes exploitability by at most $6.3\%$
+($6.636\mathrm{e}{-3}$ vs.\
+$6.240\mathrm{e}{-3}$ and $3.441\mathrm{e}{-3}$ vs.\
+$3.445\mathrm{e}{-3}$).
+
+The same launch pattern still performs well relative to OpenSpiel on larger games:
+Kim's GPU backend is $11$--$176\times$ faster on the four larger shared games. On
+Kuhn and Dark Hex, fixed launch overhead dominates both GPU implementations.
+
+\subsection{Cross-implementation check of the update-rule study}
+\label{sec:convergence}
+
+The cross-implementation grid in \cref{tab:crossframework} checks the ranking pattern of
+\cref{tab:convergence} (\cref{sec:results}).
+Across the 10 comparisons with a unique winner on both sides, the winner agrees in 10;
+2 further comparisons are excluded for a tie on at least one side. Because averaging
+conventions vary across implementations, this comparison concerns within-backend rule
+rankings. We adjudicate close rankings on the CPU path, whose reduction order is fixed,
+and use the GPU path for wall-clock timing; \cref{app:correctness} reports the
+repeated-run GPU analysis. Values are ranked only within a backend, game, and update
+order; averaging tags make explicit why absolute values are not compared across
+backends.
+
+\input{figures/TABLE_T10_crossframework.tex}
+
+\paragraph{LiteEFG: both arms.}
+LiteEFG ships four update rules: vanilla CFR, CFR$^{+}$, DCFR and PCFR$^{+}$. Only
+its vanilla CFR uses simultaneous updates; the other three alternate. None of its arms
+matches GPU-CFR on both axes at once, since the latter is CFR$^{+}$ with simultaneous
+updates, so we measured the two closest ($n=10$ per cell). \cref{tab:matrix} reports the
+simultaneous vanilla arm, which yields $185\times$ and $213\times$ on Liar's Dice and
+Battleship. The alternating CFR$^{+}$ preset costs $1.28$--$1.47\times$ more per
+iteration and therefore yields $265\times$ and $306\times$ on those two games. The preset reaches lower at matched iteration counts (for instance
+$1.24\mathrm{e}{-4}$ vs.\ $1.85\mathrm{e}{-2}$ on Liar's Dice), but that gain mixes
+the variant with the update order and so is not attributable to either alone; we
+therefore compare per-iteration cost at matched update order and leave the
+convergence comparison to \cref{fig:curves}, which plots exploitability against
+wall-clock time for the vanilla CFR arm.
+
+\paragraph{Measurement provenance.}
+Every timing number in the paper comes from the same gated campaign: each
+measurement cell ran as its own process with its GPU and pinned cores isolated from the
+host's other tenants, with
+the load average sampled before and after and the cell rejected if it exceeded a
+fixed threshold (\cref{sec:setup}). Reported values are medians over 20
+repetitions for GPU-CFR and the Ours CPU arm and 10 for Kim's GPU path and the CPU
+baselines, with ranges in the tables.

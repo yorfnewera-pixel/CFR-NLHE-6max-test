@@ -1,0 +1,24 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+For a decade, tabular CFR was the workload that GPU accelerators could not win. GPU-CFR
+ends that. It is the first CFR solver on a GPU that beats efficient CPU
+implementations, and by a wide margin: \turnSteadyMs\,ms per CFR$^{+}$ iteration on
+the 83k-Infoset HUNL turn subgame, \kimGraphRange$\times$ faster than the previous
+fastest GPU solver \cite{kim2026parallelizing} on identical A100 hardware, and
+\liteGraphLargestRange$\times$ faster than LiteEFG \cite{liu2024liteefg} on the four largest games, with a gap
+that grows with the tree. The idea behind the result is general. A fixed game is a
+program whose control flow is known before the solver starts, so compiling it once into
+flat arrays, folding chance into a template, scheduling by depth, and making every edge
+branchless turns a pointer-chasing traversal into 64 to 152 tensor operations that a
+CUDA graph replays in a single launch. The pipeline applies to any two-player
+zero-sum game, any regret-minimization rule, and any tensor framework, and the iterates
+agree bitwise with the reference implementation. Because the compiled sweep is the inner loop of subgame re-solving
+\cite{burch2014solving,li2026real}, abstraction refinement
+\cite{li2024rl,li2025efficient,li2026effective,li2026abstraction}, and neural CFR
+\cite{brown2019deep}, every solver built on tabular CFR inherits the
+speedup without changing its algorithm, and offline solves that once needed a cluster
+become a job for one GPU. The full source code of GPU-CFR, including the compiler,
+the game specifications, and the benchmark scripts, is available at
+\url{https://github.com/lbn187/GPU-CFR}, so that the compiled representation can
+serve as the starting point for future game solving hardware and software.

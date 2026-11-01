@@ -1,0 +1,17 @@
+# Research and release history index
+
+The current [README](../readme.md) leads with what can be played. These reports retain the complete positive and negative research trail; their sealed files and provenance are intentionally not moved.
+
+| Area | Starting points |
+| --- | --- |
+| Neural Deep CFR foundations | [Snapshot readiness](reports/snapshot-readiness.md), [longer six-player training](reports/holdem-longer-training.md), [higher-work local run](reports/holdem-local-fullgame.md), [representation study](reports/holdem-representation.md) |
+| Six-player tabular blueprint and search | [Checkpoint 0.4](reports/blueprint-checkpoint-04.md), [postflop search comparison](reports/blueprint-postflop-search-final.md), [seat symmetry](reports/blueprint-seat-symmetry-m4.md), [postflop replication](reports/postflop-replication-m4.md), [windowed extraction](reports/blueprint-windowed-extraction-m4.md) |
+| Fresh 20 BB learning | [Heads-up](reports/hu20-m4.md), [three-player](reports/tp20-m4.md), [robustness](reports/robustness-m4.md), [native reopening](reports/hu20-native-reopening-m4.md) |
+| B100M scale and diagnosis | [Failed dual-Mac attempt](reports/hu20-scaling-both-macs.md), [M4 recovery](reports/hu20-scaling-m4-recovery.md), [completed diagnostics](reports/hu20-scaling-diagnostics.md), [separate decision diagnosis](reports/hu20-b100-diagnosis-m4.md) |
+| Human/agent observations and post-Luna regression | [Luna benchmark](reports/luna-browser-benchmark.md), [big-pot analysis](reports/luna-browser-big-pot-analysis.md), [frozen stackoff protocol](hu20-stackoff-protocol.md), [checkpoint regression](reports/hu20-stackoff-v1-m1.md) |
+| HU20 card representation | [Lessons from earlier abstraction attempts](reports/hu20-abstraction-lessons.md) (read first), [model-free bucket collisions](reports/hu20-bucket-coarseness.md), [frozen v2 100M A/B and negative results](reports/hu20-card-v2.md) |
+| HU20 O average confirmation | [Fresh release-rule confirmation](reports/hu20-v041-o-confirmation.md), [unpublished candidate readiness](releases/v0.4.1/READINESS.md), [floor control](reports/hu20-floor-control.md) |
+| HU20 trainer bench | [Frozen protocol](hu20-trainer-bench-protocol.md), [completed learning curve and classification](reports/hu20-trainer-bench.md) |
+| Protocols and current direction | [Roadmap](../ROADMAP.md), [full roadmap history](roadmap-history.md), [rules](rules.md), [observations](observations.md), [model card](hu20-native-reopening-model-card.md) |
+
+Older source releases and tags are preserved as historical artifacts unless I separately approve an exact cleanup. Their version numbers do not map onto the current [release plan](../readme.md#release-plan).

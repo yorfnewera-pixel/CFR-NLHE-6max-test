@@ -1,0 +1,14 @@
+\section{Systems Implications}
+\label{sec:discussion}
+
+\paragraph{Algorithmic semantics define the unit of comparison.}
+CFR variant, update order, and averaging convention jointly determine the iterates
+\cite{burch2019revisiting}
+and the work performed by one iteration, so systems timing must hold them matched
+(\cref{tab:convergence}).
+
+\paragraph{Static execution changes the runtime bottleneck.}
+Compilation moves topology, indexing, and scheduling to build time; graph
+replay then turns the fixed kernel sequence into one graph launch. Launch cost is
+fixed per iteration, so the compiled schedule absorbs additional parallel work at
+constant submission cost, so the margin grows with scale.

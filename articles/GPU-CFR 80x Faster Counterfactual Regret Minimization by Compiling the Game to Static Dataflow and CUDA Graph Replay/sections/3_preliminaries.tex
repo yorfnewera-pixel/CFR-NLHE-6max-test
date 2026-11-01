@@ -1,0 +1,84 @@
+\section{Preliminaries}
+\label{sec:prelim}
+
+A two-player zero-sum extensive-form game is a finite tree of \emph{histories}, also
+called \emph{states} \cite{koller1997representations,zinkevich2007regret}. A
+history $h \in \nodes$ is the sequence of all actions taken from the root
+$\varnothing$, including chance's. In poker it fixes both players' private cards,
+the public cards, and the betting sequence. Performing an action $a$ at a non-terminal
+history $h$ leads to the history $h \cdot a$. Each non-terminal history is owned by
+player 1, player 2, or chance; chance histories have fixed action distributions. A
+terminal history $z \in \termnodes \subset \nodes$ has no actions and pays $u(z)$ to
+player~1 (player~2 receives $-u(z)$).
+
+Player $i$ cannot distinguish histories that differ only in what is hidden from $i$.
+An \emph{information set} (Infoset) $I \in \infosets_i$ is a maximal set of histories that are
+indistinguishable to $i$. They share $i$'s private information and the public
+sequence, and differ only in the opponent's private information. Every history $h$,
+terminal or not, therefore lies in exactly one information set of each player,
+$I_1(h)$ and $I_2(h)$. In poker $I_i(h)$ is $i$'s hand, the board, and the betting. Histories in the same $I$ owned by $i$ share an action set
+$\acts(I)$. We assume perfect recall \cite{zinkevich2007regret}. A \emph{public node} $s(h)$
+\cite{burch2014solving,moravvcik2017deepstack} collects the
+histories that share everything both players can see. These objects give the two size counts used throughout. \emph{States} is the
+number of non-chance histories, terminals included. \emph{Infosets} is the number of
+pairs $(i, I_i(h))$ over those histories, again terminals included.
+A behavioral strategy $\strat_i$ assigns each $I \in \infosets_i$ owned by $i$ a
+distribution over $\acts(I)$. For a profile $\strat = (\strat_1, \strat_2)$, the reach
+probability $\reach^{\strat}(h)$ of history $h$ factors into player-1, player-2, and
+chance contributions. The counterfactual reach $\creach(h)$ excludes player $i$'s own
+contribution. We report exploitability as NashConv \cite{lanctot2019openspiel} divided
+by two, computed by exact best response \cite{johanson2011accelerating}:
+\begin{equation}
+    \expl(\strat) = \frac{1}{2} \sum_i \left[\max_{\strat_i'} u_i(\strat_i', \strat_{-i}) - u_i(\strat)\right].
+    \label{eq:exploitability}
+\end{equation}
+
+CFR \cite{zinkevich2007regret} is an iterative self-play procedure over this tree.
+Iteration $t$ holds a current profile $\strat^t$, a cumulative regret $\regret^t(I,a)$
+for every information-set action, and an average-strategy accumulator. Four steps
+turn $\strat^t$ into $\strat^{t+1}$. First, a \emph{forward reach pass} propagates
+reach probabilities from the root, one product per edge:
+\begin{equation}
+    \reach^{\strat}(h\cdot a) = \reach^{\strat}(h)\,\strat_{P(h)}(I(h),a),
+    \label{eq:reach}
+\end{equation}
+where $P(h)$ is the owner of $h$ and chance edges use their fixed probabilities.
+Second, a \emph{backward value pass} folds terminal payoffs up the tree, one
+strategy-weighted sum per node, and aggregates them into counterfactual values that
+weight each history by every contribution except player $i$'s own:
+\begin{equation}
+\begin{aligned}
+    \cfv_i(I,a) &= \sum_{h\in I}\creach(h)\sum_{z\in\termnodes}\reach^{\strat}(h\cdot a, z)\,u_i(z),\\
+    \cfv_i(I) &= \sum_{a\in\acts(I)}\strat_i(I,a)\,\cfv_i(I,a).
+\end{aligned}
+    \label{eq:cfv}
+\end{equation}
+Third, the solver adds the instantaneous regret of each action to its accumulator:
+\begin{equation}
+    \regret^{t}(I,a) = \regret^{t-1}(I,a) + \cfv_i^{t}(I,a) - \cfv_i^{t}(I).
+    \label{eq:regret}
+\end{equation}
+Fourth, regret matching \cite{hart2000simple} sets the next strategy proportional to
+positive regret, and the reach-weighted current strategy is folded into the average:
+\begin{equation}
+\begin{aligned}
+    \strat^{t+1}(I,a) &= \frac{\regret^{t}_{+}(I,a)}{\sum_{a'}\regret^{t}_{+}(I,a')},\\
+    \avgstrat^{T}(I,a) &\propto \sum_{t\le T} w_t\,\reach_i^{\strat^t}(I)\,\strat^t(I,a),
+\end{aligned}
+    \label{eq:rm}
+\end{equation}
+with $\regret_{+}=\max(\regret,0)$, a uniform strategy when the denominator is zero,
+and $w_t=1$ for uniform or $w_t=t$ for linear averaging \cite{tammelin2014solving}.
+The average $\avgstrat^{T}$ converges to a Nash equilibrium at rate
+$O(1/\sqrt{T})$ \cite{zinkevich2007regret}. CFR$^{+}$ \cite{tammelin2014solving} changes one line. It clamps the accumulator
+itself, $\regret^{t}\gets\max(\regret^{t},0)$ after \cref{eq:regret}, and
+converges much faster in practice \cite{tammelin2015solving,burch2019revisiting}. DCFR \cite{brown2019solving} and PCFR$^{+}$
+\cite{farina2021faster} (\cref{tab:convergence}) keep this loop and change only how
+the two accumulators evolve. In systems terms, every rule is the same sparse computation each iteration: two
+sweeps over a fixed irregular tree plus a segment-normalized update per information
+set, with only the numbers changing. Players may be updated \emph{simultaneously}
+from one strategy profile or \emph{alternately}, where the first player's update is
+visible to the second's in the same sweep \cite{burch2019revisiting}. An alternating
+iteration is one half-update per player and therefore roughly twice the work. GPU-CFR
+supports both orders and both uniform and linear strategy averaging. The timing
+matrix fixes these choices for matched comparisons (\cref{sec:setup}).

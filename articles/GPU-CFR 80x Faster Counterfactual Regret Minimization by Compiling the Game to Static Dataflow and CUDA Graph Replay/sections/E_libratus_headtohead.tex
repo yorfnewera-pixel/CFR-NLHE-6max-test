@@ -1,0 +1,129 @@
+\section{Poker Head-to-Heads and the Value-Agreement Certificate}
+\label{app:libratus}
+
+The HUNL subgames and the Libratus endgames are built by our own code, so putting an
+external solver on them requires handing it our tree in a format it can load.
+This appendix describes how, what the resulting comparisons say, and the certificate
+that establishes the three backends are solving the same game.
+
+\paragraph{Exporting our trees.}
+LiteEFG's \texttt{FileEnv} reads a generic extensive-form text format --- node lines for
+terminal payoffs, chance edges with conditional probabilities, and player action lists,
+plus infoset membership lines --- and its OpenSpiel bridge is one of several possible writers for that format. We emit it from our intermediate representation in a
+single streaming pass with the root written first, so peak memory during export is set by the
+infoset membership index, and the serialized text streams to disk. Kim (2026) reaches the same
+file through a black-box game adapter, which is necessary because it runs in a separate
+interpreter that must not import our package. Both backends load one checksummed
+artifact per game, produced once and cached.
+
+One detail of the adapter is worth recording because getting it wrong is silent. Kim
+(2026) builds each infoset's action set by unioning the labels the adapter reports at
+that infoset's member nodes, so a label must name an \emph{action}. Child
+node names are globally unique and would therefore split each infoset into as many
+action sets as it has members: the tree keeps its shape and every count still looks
+right, while the solver optimizes over a strictly finer strategy space than the file
+describes. On Kuhn poker that raises the sequence count from 13 to 25 per player and
+improves apparent exploitability by more than two orders of magnitude, a number
+comparable to nothing. Labelling actions by position among a node's children fixes it,
+and is sound because the exporter validates that every member node of an infoset lists
+its actions in the infoset's order.
+
+\paragraph{Structural equivalence.}
+Two checks confirm the export preserves the game. Exported Kuhn poker solved through the
+adapter reproduces the exploitability of the same game loaded natively from OpenSpiel
+\emph{bitwise}, both giving $0.0020750612020492554$ at $13$ sequences per player, and exported
+Leduc poker gives $1093$ sequences per player either way. On the trees that matter here
+the sequence counts Kim (2026) derives from the file agree exactly with what GPU-CFR's
+compiler holds: the river subgame yields $701$ row and $701$ column sequences on
+both sides, and Libratus endgame~4 yields $19{,}741$ and $27{,}497$, reproduced by
+the baseline to the unit on a tree of $36{,}098{,}785$ nodes.
+
+\paragraph{The certificate that scales: comparing on the value.}
+The \emph{value} is comparable across backends whatever each one runs, because a
+zero-sum tree has exactly one. For a
+profile $(x,y)$ with per-player best-response gains $\delta_0, \delta_1$ and
+$\mathrm{NashConv} = \delta_0 + \delta_1$, the usual sandwich
+$\min_{y'} u_0(x,y') \le v^\ast \le \max_{x'} u_0(x',y)$ gives
+$|u_0(x,y) - v^\ast| \le \max(\delta_0,\delta_1) \le \mathrm{NashConv}$, so for any two
+backends
+%
+\begin{equation}
+    |v_i - v_j| \;\le\; \mathrm{NashConv}_i + \mathrm{NashConv}_j .
+    \label{eq:valuecert}
+\end{equation}
+%
+\cref{eq:valuecert} is an exact identity: if it fails, at least one backend is
+not solving the tree the other one is. It is also the check that scales, since it needs
+only two scalars per backend and applies unchanged to trees far too large to compare
+structurally. It is what caught the labelling bug above, and it is reported for every
+poker head-to-head below.
+
+\paragraph{Gaps agree once the variant is matched.}
+The certificate constrains values, so on its own it leaves open whether the backends
+merely solve the same game or also converge alike. Exploitability settles that, but only
+when the algorithm is held fixed: LiteEFG's CFR$^{+}$ preset uses alternating updates
+with linear averaging, and reading its gap against a simultaneous-update run compares
+two algorithms. Matching the variant removes the
+confound. Rerunning GPU-CFR on the river subgame in LiteEFG's own configuration
+--- CFR$^{+}$, alternating, linear averaging, float64 --- gives exploitability
+$1.27 \times 10^{-5}$ against LiteEFG's $1.25 \times 10^{-5}$ at $T = 8{,}000$, a
+$1.6\%$ difference, with game values $1.77774849$ and $1.77774846$ agreeing to
+$3 \times 10^{-8}$. Two independently written deterministic solvers reaching eight
+significant figures of agreement on a $137{,}415$-state tree is a sharper statement than
+\cref{eq:valuecert} alone can make, and it localizes the spread in the earlier tables to
+the update order. The measurement is on the same
+device and dtype for both, so it also fixes the price: an alternating iteration performs
+one half-update per player and costs about twice a simultaneous one, and it still reaches
+a smaller gap at matched wall-clock.
+
+\paragraph{The river subgame, three ways.}
+\cref{tab:riverthreeway} solves the $137{,}415$-state river subgame with all three
+backends at two iteration counts. Every pair satisfies \cref{eq:valuecert} with wide
+margin, using at most $24\%$ of the bound, and the agreement tightens with the gaps: an
+eightfold increase in iterations shrinks the three-way value spread from
+$1.02 \times 10^{-3}$ to $8.58 \times 10^{-5}$, a factor of $12$. The timings in the
+table are median training-call wall-clock on the hardware of \cref{app:protocol};
+quality metrics come from the fastest run. The
+iteration counts are matched while the variants are not, so they measure what each
+backend costs to run its own $1{,}000$ iterations, which is the quantity a
+practitioner pays.
+
+\input{figures/TABLE_T7_riverthreeway.tex}
+
+\paragraph{Libratus endgame~4.}
+The largest tree we put through all three backends is Libratus endgame~4 at full range:
+$36{,}098{,}785$ nodes, exported as a $2.42$\,GB file. Its scale is what the export
+mechanism buys and also what bounds it. GPU-CFR reads the endgame in $165.889$\,s,
+compiles it and constructs the solver in $124.751$\,s, and solves it on one A100 at a
+peak of $14.4$\,GiB allocated ($16.9$\,GiB reserved) in the benchmark process, which
+also holds the float64 evaluation tree; the solver alone peaks at $8.9$\,GiB
+(\cref{tab:lifecycle}). Kim (2026) parses the file in
+$399.341$\,s and solves it on the same device; LiteEFG's
+\texttt{FileEnv} loads it at $24.4$\,GiB resident and then iterates at
+$13.856$\,s, so $200$ iterations is where all three meet. \cref{tab:sg4threeway}
+(\cref{sec:results}) reports that point. The three values agree to $2.5$ chips on a
+tree whose $200$-iteration gaps run to $77$ chips, using $1.4\%$ of what
+\cref{eq:valuecert} allows, and the two GPU backends agree to $0.39$ chips at
+$1{,}000$ iterations. The same $200$ iterations cost $3.180$\,s on GPU-CFR and
+$2{,}771.135$\,s on LiteEFG: a factor of $870$ at matched iteration counts, each
+backend running its own CFR$^{+}$, and the C++ implementation's advantage at small
+scale (\cref{sec:matrix}) has inverted completely. On this tree the two GPU backends
+cost within $14\%$ of each other: its $36$ million states carry $96{,}159$
+Infosets, so our node-level dataflow and Kim's sequence-form products spend
+$13.435$ and $11.820$\,ms per incremental iteration, and the $30$--$80\times$ gap of
+\cref{tab:matrix} closes where the tree is almost all terminals. The GPU-CFR training times
+report the median of two runs ($3.180$ and $3.188$\,s at $200$ iterations, $0.3\%$ apart),
+with quality metrics from the fastest run; the baseline rows are single runs,
+each costing $46$ minutes (LiteEFG) or a seven-minute parse (Kim). Each GPU-CFR
+training call starts on a freshly constructed solver, so it includes the three eager
+warmup iterations and graph capture; on this tree capture itself costs well under a
+second (\cref{tab:lifecycle}), and the call is $197$ replays at the steady-state rate
+plus that setup.
+
+\paragraph{Endgame~3.}
+We do not put the external baselines on endgame~3 ($194{,}556$ Infosets on
+$93{,}168{,}610$ nodes): its
+export would exceed $6$\,GB, and LiteEFG's load already peaks at $24.4$\,GiB on the
+$2.6\times$ smaller endgame~4, so file loading would dominate the arm's time. The
+head-to-head evidence stops at endgame~4's scale, where \cref{eq:valuecert} holds across
+all three backends.

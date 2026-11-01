@@ -1,0 +1,110 @@
+\section{Introduction}
+\label{sec:intro}
+
+Counterfactual regret minimization (CFR) \cite{zinkevich2007regret} is the algorithm
+of choice for computing equilibria in large games of hidden information, a class that
+includes poker, bargaining, and adversarial security settings. Interestingly, tabular
+CFR has resisted the move to accelerators, and its fastest implementations still run
+on CPUs. Its execution
+model explains why. One iteration touches every node of a game tree in millions of tiny
+dependent steps. Each step chases a pointer, branches on the node type, and updates a
+handful of floats. Every read and write is therefore a data-dependent gather or scatter
+\cite{kim2026parallelizing}, and a wide processor finds nothing to batch in such a
+walk. Deployed implementations therefore still execute CFR as a node-wise tree
+traversal through a generic game interface
+\cite{lanctot2019openspiel,liu2024liteefg,steinberger2019pokerrl,li2026real}.
+
+This cost matters because the solves are time-bound. Modern game-playing agents must
+solve a game tree with tens of millions of states within a few seconds during play
+\cite{burch2014solving,ganzfried2015endgame,moravcik2016refining,brown2017safe,moravvcik2017deepstack,brown2018superhuman,brown2019superhuman,vsustr2019monte,brown2018depth,steinberger2019pokerrl},
+so the cost of one solver iteration bounds what any such agent can do. Tabular CFR and
+its CFR$^{+}$ refinement \cite{tammelin2014solving} produced the essential solution of
+heads-up limit hold'em \cite{bowling2015heads,tammelin2015solving} and drive
+superhuman poker AIs
+\cite{brown2018superhuman,moravvcik2017deepstack,brown2019superhuman}. The tabular form
+remains the field's workhorse: the reference against which every approximation is
+checked \cite{lanctot2009monte,brown2019deep,schmid2019variance}, the source of the
+exact best-response evaluations that certify solution quality
+\cite{johanson2011accelerating,li2026av,li2026agents}, and the inner loop of online re-solving
+\cite{burch2014solving,brown2017safe,sustr2020sound,li2025efficient,li2026real}.
+
+That demand has driven many attempts to move the workload onto accelerators, and none has
+produced a GPU solver whose iteration time is below that of an efficient CPU
+implementation \cite{kim2026parallelizing,DBLP:journals/corr/abs-2508-06559}. The
+milestone poker systems sidestepped the GPU entirely and used supercomputer-scale CPU
+parallelism instead \cite{bowling2015heads,tammelin2015solving,brown2018superhuman}.
+Porting the traversal to a GPU shows why. Every kernel runs for microseconds, so the
+time goes into launching kernels and dispatching framework operations
+\cite{guide2020cuda,paszke2019pytorch}, and arithmetic is a small fraction of it. The fastest prior GPU CFR
+is the sequence-form \cite{koller1997representations} implementation of Kim (2026)
+\cite{kim2026parallelizing}. It expresses each tree level as a sparse matrix product,
+yet its iteration still takes longer than an optimized CPU solver. Its iteration also
+cannot be recorded as a CUDA graph, because the sparse products and per-level index
+traffic it relies on are not capturable (\cref{app:profile}). The obstacle lies in the
+representation the algorithm runs on, and the workload itself is unusually regular. When the same game is solved for many
+iterations, the tree topology, information sets, chance behavior, tensor shapes, and
+data dependencies stay constant. Only solver state changes: strategies, reaches,
+regrets, values, and the iteration weight. This raises a systems question. How much
+of tabular CFR's cost is an artifact of its execution plan, and how much of it can a
+compiler remove without touching the algorithm?
+
+\begin{figure}[!htb]
+    \centering
+    \includegraphics[width=0.62\linewidth]{figures/fig1_hero_scaling.pdf}
+    \caption{Steady-state time per CFR iteration versus game size (both axes
+    logarithmic; lower is better); backends and variants as in \cref{tab:matrix}.}
+    \Description{Log-log scatter plot of steady-state milliseconds per iteration
+    against game size in Infosets for six systems. The graph-replayed GPU-CFR curve
+    stays nearly flat while baseline curves rise with game size, giving the widest
+    margins on the largest games.}
+    \label{fig:hero}
+\end{figure}
+
+To remove these obstacles, we propose GPU-CFR, which treats a fixed game as a program
+to be compiled. GPU-CFR walks a game once (two
+players, zero-sum, perfect recall) and emits flat edge,
+information-set slot, and depth arrays. An iteration then becomes a fixed sequence of
+depth-level batched gather and scatter operations over those arrays. Three techniques
+shape the compiled iteration. Static chance folding moves all strategy-independent
+chance work to build time. Depth-level execution blocks collapse each traversal stage
+into one batched operation per tree level. A dual-lane reach buffer advances both
+players' reach probabilities in a single operation, and a sentinel slot removes the
+last per-edge branch. The resulting sequence has fixed shapes, indices, and buffer
+addresses, so CUDA Graph Replay \cite{guide2020cuda} records it once and replays it
+with one graph launch per iteration. The design separates the two sources of run-time
+cost. The compiled representation reduces the work issued to the tensor framework, and
+graph replay reduces the cost of issuing it.
+
+The compiled iteration pays off most where the trees are largest. \Cref{fig:hero} plots
+steady-state time per iteration against game size for every backend we test. The CPU
+libraries and the prior GPU implementation slow down as the tree grows. The
+graph-replayed GPU-CFR curve stays nearly flat, so the margin widens with scale. On
+one A100, a heads-up no-limit Texas hold'em (HUNL) turn subgame with 83{,}040
+information sets (Infosets) runs at \turnSteadyMs\,ms per
+steady-state CFR$^{+}$ iteration. Against the matched A100 implementation of
+Kim (2026)~\cite{kim2026parallelizing}, graph replay is \kimGraphRange$\times$ faster
+across the eight-game suite. Against LiteEFG \cite{liu2024liteefg}, one of the
+fastest open-source CPU implementations, it is
+\liteGraphLargestRange$\times$ faster on the four largest games. Most of this margin
+comes from the compiled representation itself: the same compiled solver on eight CPU
+threads already beats the A100 baseline by \kimCpuRange$\times$. GPU-CFR in turn
+outperforms every CPU path we test, including that eight-thread arm and its one-socket
+scaling in \cref{app:profile}.
+
+We answer three systems questions. (Q1) How can a full CFR iteration be compiled into
+fixed tensor dataflow while preserving its update semantics? (Q2) Which gains come
+from the compiled representation and which come from CUDA Graph Replay? (Q3) When does
+the lower iteration cost translate into lower wall-clock time for solution quality and
+for repeated solves? Our contributions are:
+\begin{enumerate}
+    \item \textbf{A game-to-dataflow compiler for tabular CFR.} GPU-CFR maps a fixed
+game to flat arrays and a depth-level execution schedule, including static chance
+folding and a dual-lane reach representation
+(\cref{fig:archpipeline,fig:archdataflow}).
+    \item \textbf{CUDA Graph Replay with a causal performance decomposition.} We
+separate representation cost from framework dispatch and graph-launch cost through
+operation counts, eager/graph ablations, scaling, and repeated-solve measurements.
+    \item \textbf{State-of-the-art GPU performance for tabular CFR.} GPU-CFR runs
+\kimGraphRange$\times$ faster than the matched A100 baseline across the eight-game
+suite and outperforms every tested CPU path (\cref{sec:results}).
+\end{enumerate}

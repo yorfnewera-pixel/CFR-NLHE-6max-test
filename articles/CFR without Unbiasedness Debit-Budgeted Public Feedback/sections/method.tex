@@ -1,0 +1,75 @@
+\section{Debit-Budgeted CFR}
+\label{sec:method}
+
+DB-CFR separates execution, settlement, and planning.  The \emph{executor}
+produces an event-faithful learner record for one declared width and order.
+The \emph{auditor} computes the target debit of an executed partial block.
+The \emph{planner} reads only completed learner history and settled charges;
+it never evaluates an unselected future profile.  Complete coverage connects
+these modules by supplying an always-available zero-debit action.
+
+\begin{table}[h]
+\caption{One causal DB-CFR block.  Partial plans execute only while the settled
+account is solvent and the audit queue has capacity.}
+\label{tab:db-cfr-algorithm}
+\centering
+\small
+\begin{tabularx}{\linewidth}{@{}p{0.055\linewidth}X@{}}
+\toprule
+\multicolumn{2}{@{}l@{}}{\textbf{Input:} learner state, settled account
+$A_{k-1}$, pending set $P_{k-1}$, budget $b(T_k)$, cap $\ell$.} \\
+\midrule
+1 & Settle every completed audit, updating $A_{k-1}$ and $P_{k-1}$. \\
+2 & If $A_{k-1}>b(T_k)$ or $|P_{k-1}|\ge\ell$, choose complete coverage. \\
+3 & Otherwise choose one registered plan by a fixed completed-history rule. \\
+4 & Execute that plan once under the event-faithful contract. \\
+5 & Settle a complete block at charge zero; enqueue a partial block for
+target-debit audit. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The method is causal because Step 3 cannot read the current block's charge.
+Theorem~\ref{thm:debit-controller} permits any such history rule: cost,
+previous charges, and learner state may affect the plan, while the debit
+account controls when exact recovery is required.  A final reported
+certificate either drains the queue or retains the reserve
+$R_K^{(\ell)}$.
+
+\subsection{Computing the settled charge}
+
+The charge is defined by the dense target at the learner origins that actually
+occurred.  An exact audit evaluates the omitted components at these immutable
+origins and applies Equation~\ref{eq:block-charge}; interval or factored
+observers may instead upper-bound the same terms.  The appendix gives a finite
+summation-by-parts identity that separates the weighted endpoint from component
+motion along the executed path.  Complete coverage uses the stronger eventwise
+identity $h_{\rho,t}=g_{\rho,t}$ and therefore settles at zero without an
+audit.
+
+\subsection{Lagged causal instantiation}
+
+The public-Leduc implementation uses synchronous post-block settlement
+($\ell=1$), widths $2$, $5$, and $10$, twelve ten-round blocks, and
+$b(T)=12\sqrt T$.  When the account is insolvent it executes width 10.  While
+solvent, it observes widths 5 and 2 once, then chooses the least-work partial
+width whose most recently settled charge fits the current slack; if neither
+does, it chooses the width with the smaller last charge.  The selected block
+executes once and its exact charge settles before the next decision.
+
+This rule receives neither exploitability nor a future candidate state.  It
+uses zero unselected candidate replays, and its selected width can change with
+the realized learner path.  The appendix retains a prospective exact-lookahead
+controller as a strong comparator and audits its cost-ordered offer search.
+
+\subsection{Bounded asynchronous settlement}
+
+When selected-path audits run concurrently, the learner may open up to
+$\ell$ partial blocks before their charges settle.  Each audit consumes an
+immutable event record; the planner enters complete recovery when either the
+settled account or the queue cap blocks another partial action.  The finite
+reserve in Theorem~\ref{thm:debit-controller} accounts for every hidden charge,
+so asynchronous completion changes the bound but not the declared learner
+recurrence.  This interface removes audit latency from the sequential decision
+path; audit CPU and record traffic remain part of the system cost measured in
+Section~\ref{sec:experiments}.

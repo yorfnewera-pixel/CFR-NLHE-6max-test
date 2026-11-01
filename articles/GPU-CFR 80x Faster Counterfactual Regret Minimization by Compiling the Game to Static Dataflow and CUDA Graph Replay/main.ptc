@@ -1,0 +1,91 @@
+\contentsline {section}{\numberline {1}Introduction}{1}{section.1}%
+\contentsline {section}{\numberline {2}Related Work}{3}{section.2}%
+\contentsline {paragraph}{The CFR family and exact equilibrium solving.}{3}{paragraph*.2}%
+\contentsline {paragraph}{Scaling CFR by approximation.}{3}{paragraph*.3}%
+\contentsline {paragraph}{Systems and frameworks for game solving.}{4}{paragraph*.4}%
+\contentsline {section}{\numberline {3}Preliminaries}{4}{section.3}%
+\contentsline {section}{\numberline {4}Compiling CFR onto Accelerators}{5}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Compiled game representation}{5}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}One iteration as a fixed dataflow}{6}{subsection.4.2}%
+\contentsline {paragraph}{(a) Static chance folding.}{7}{paragraph*.6}%
+\contentsline {paragraph}{(b) Depth-level execution blocks.}{7}{paragraph*.7}%
+\contentsline {paragraph}{(c) Sentinel slot and dual-lane reach buffer.}{7}{paragraph*.8}%
+\contentsline {subsection}{\numberline {4.3}CUDA-graph execution}{8}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Layered verification}{9}{subsection.4.4}%
+\contentsline {section}{\numberline {5}The Compiled Iteration, Formally}{9}{section.5}%
+\contentsline {paragraph}{Three indexed operators.}{10}{paragraph*.10}%
+\contentsline {paragraph}{What the operators compute.}{10}{paragraph*.11}%
+\contentsline {paragraph}{The averaging horizon.}{11}{paragraph*.12}%
+\contentsline {section}{\numberline {6}Experimental Setup}{11}{section.6}%
+\contentsline {paragraph}{Three evaluation suites.}{11}{paragraph*.13}%
+\contentsline {paragraph}{Backends.}{11}{paragraph*.15}%
+\contentsline {paragraph}{Shared game representations.}{12}{paragraph*.16}%
+\contentsline {paragraph}{Protocol.}{12}{paragraph*.17}%
+\contentsline {section}{\numberline {7}Results}{12}{section.7}%
+\contentsline {paragraph}{Cross-framework timing.}{12}{paragraph*.20}%
+\contentsline {paragraph}{Where the speed comes from.}{13}{paragraph*.21}%
+\contentsline {paragraph}{Quality against wall-clock.}{14}{paragraph*.25}%
+\contentsline {paragraph}{Update rule and update order.}{15}{paragraph*.27}%
+\contentsline {paragraph}{Repeated solves of one tree.}{16}{paragraph*.29}%
+\contentsline {section}{\numberline {8}Conclusion}{17}{section.8}%
+\ttl@starttoc {sections@1}
+\contentsline {section}{\numberline {9}HUNL Subgame Construction}{23}{section.9}%
+\contentsline {paragraph}{The two native subgames.}{23}{paragraph*.31}%
+\contentsline {paragraph}{Background: subgame solving and online re-solving.}{23}{paragraph*.32}%
+\contentsline {paragraph}{River subgame.}{23}{paragraph*.33}%
+\contentsline {paragraph}{Turn subgame.}{23}{paragraph*.34}%
+\contentsline {paragraph}{Analytic anchors.}{23}{paragraph*.35}%
+\contentsline {paragraph}{Best-response oracle.}{23}{paragraph*.36}%
+\contentsline {paragraph}{External reconstruction of the river subgame.}{23}{paragraph*.37}%
+\contentsline {paragraph}{Scope of the external reconstruction.}{24}{paragraph*.38}%
+\contentsline {section}{\numberline {10}Benchmark Protocol and Environment}{24}{section.10}%
+\contentsline {paragraph}{Hardware and software.}{24}{paragraph*.39}%
+\contentsline {paragraph}{Timing rules.}{24}{paragraph*.40}%
+\contentsline {paragraph}{Operation and memory counters.}{25}{paragraph*.41}%
+\contentsline {paragraph}{Solve protocol.}{25}{paragraph*.42}%
+\contentsline {paragraph}{Conversion validation.}{25}{paragraph*.44}%
+\contentsline {paragraph}{Reproduction.}{25}{paragraph*.45}%
+\contentsline {section}{\numberline {11}Correctness Test Inventory}{26}{section.11}%
+\contentsline {paragraph}{Reference-oracle parity.}{26}{paragraph*.46}%
+\contentsline {paragraph}{Independent reference solver.}{26}{paragraph*.47}%
+\contentsline {paragraph}{Structural invariants.}{26}{paragraph*.48}%
+\contentsline {paragraph}{CUDA-graph path.}{26}{paragraph*.49}%
+\contentsline {paragraph}{Seed-invariance audit.}{26}{paragraph*.50}%
+\contentsline {paragraph}{How far reduction-order noise propagates.}{26}{paragraph*.51}%
+\contentsline {paragraph}{Performance gates (load-immune).}{27}{paragraph*.52}%
+\contentsline {paragraph}{Evaluator and game-level checks.}{27}{paragraph*.53}%
+\contentsline {section}{\numberline {12}Additional Results}{27}{section.12}%
+\contentsline {paragraph}{Solver lifecycle.}{27}{paragraph*.54}%
+\contentsline {paragraph}{Peak GPU memory.}{27}{paragraph*.56}%
+\contentsline {paragraph}{Timing dispersion.}{27}{paragraph*.58}%
+\contentsline {paragraph}{Kim (2026): precision.}{27}{paragraph*.60}%
+\contentsline {subsection}{\numberline {12.1}Cross-implementation check of the update-rule study}{27}{subsection.12.1}%
+\contentsline {paragraph}{LiteEFG: both arms.}{28}{paragraph*.62}%
+\contentsline {paragraph}{Measurement provenance.}{29}{paragraph*.63}%
+\contentsline {section}{\numberline {13}Poker Head-to-Heads and the Value-Agreement Certificate}{30}{section.13}%
+\contentsline {paragraph}{Exporting our trees.}{30}{paragraph*.64}%
+\contentsline {paragraph}{Structural equivalence.}{31}{paragraph*.65}%
+\contentsline {paragraph}{The certificate that scales: comparing on the value.}{31}{paragraph*.66}%
+\contentsline {paragraph}{Gaps agree once the variant is matched.}{31}{paragraph*.67}%
+\contentsline {paragraph}{The river subgame, three ways.}{31}{paragraph*.68}%
+\contentsline {paragraph}{Libratus endgame\nobreakspace {}4.}{32}{paragraph*.70}%
+\contentsline {paragraph}{Endgame\nobreakspace {}3.}{32}{paragraph*.71}%
+\contentsline {section}{\numberline {14}Kernel-Level Profile and Alternative Execution Models}{32}{section.14}%
+\contentsline {paragraph}{What one iteration launches.}{32}{paragraph*.72}%
+\contentsline {paragraph}{More iterations per graph.}{33}{paragraph*.73}%
+\contentsline {paragraph}{A generic compiler on the same dataflow.}{33}{paragraph*.74}%
+\contentsline {paragraph}{Graph capture of the prior GPU baseline.}{33}{paragraph*.75}%
+\contentsline {paragraph}{CPU thread scaling.}{33}{paragraph*.76}%
+\contentsline {paragraph}{Hand-fused kernels.}{33}{paragraph*.77}%
+\contentsline {section}{\numberline {15}Compiler Passes and Memory Plan}{35}{section.15}%
+\contentsline {paragraph}{Planning scope.}{36}{paragraph*.82}%
+\contentsline {paragraph}{Input representation.}{36}{paragraph*.83}%
+\contentsline {paragraph}{Mutable and immutable fields.}{36}{paragraph*.84}%
+\contentsline {paragraph}{Update rules share one schedule.}{36}{paragraph*.86}%
+\contentsline {section}{\numberline {16}Proofs}{37}{section.16}%
+\contentsline {subsection}{\numberline {16.1}Proposition\nobreakspace {}\ref {prop:chance}: folded chance is exact}{37}{subsection.16.1}%
+\contentsline {subsection}{\numberline {16.2}Proposition\nobreakspace {}\ref {prop:lanes}: the dual-lane update is exact}{38}{subsection.16.2}%
+\contentsline {subsection}{\numberline {16.3}Proposition\nobreakspace {}\ref {prop:depth}: the depth schedule is shortest}{38}{subsection.16.3}%
+\contentsline {subsection}{\numberline {16.4}Proposition\nobreakspace {}\ref {prop:horizon}: the averaging horizon}{39}{subsection.16.4}%
+\contentsline {section}{\numberline {17}Future Work}{39}{section.17}%
+\contentsfinish 

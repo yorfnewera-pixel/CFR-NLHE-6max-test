@@ -1,0 +1,41 @@
+% B3: the realized per-iteration operation schedule. Hand-authored from the
+% solver's execution path; the two "per level" rows are the c2 D term of
+% Proposition \ref{prop:depth}, everything else is the constant c1.
+\begin{table}[!htb]
+\centering
+\caption{The realized operation schedule of one CFR$^{+}$ iteration
+(\cref{fig:archdataflow}). $\mathrm{ia}$ abbreviates \texttt{index\_add},
+$I(q)$ is the information set owning slot $q$, and the build-time sign
+$s \in \{\pm 1\}$ orients each edge's regret toward its acting player. Only the
+two per-level rows repeat with depth.}
+\label{tab:opsteps}
+{
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llr@{}}
+\toprule
+Realized operation & Data & Ops \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{Regret matching (constant)}} \\
+$\strat^{+} \gets \mathrm{clamp}(\regret, 0)$ & $[\numslots]$ & 1 \\
+$\mathrm{tot} \gets 0$;\; $\mathrm{tot}.\mathrm{ia}(I(q), \strat^{+})$ & $[\numslots] {\to} [\numinfosets]$ & 2 \\
+gather $\mathrm{tot}$ back to slots & $[\numinfosets] \to [\numslots]$ & 1 \\
+$m \gets \mathrm{tot} > 0$;\; guard divisor via $\mathrm{where}$ & $[\numslots]$ & 2 \\
+$\strat \gets \mathrm{where}(m, \strat^{+}/\mathrm{tot}, \mathrm{unif})$ & $[\numslots]$ & 2 \\
+$\strat_{\mathrm{ext}}[{:}\numslots] \gets \strat$ \; (sentinel stays $1$) & $[\numslots{+}1]$ & 1 \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{Forward reach, per level $\ell = 1, \dots, D$}} \\
+$\reach[C_2(\ell)] \gets \reach[P_2(\ell)] \cdot \strat_{\mathrm{ext}}[S_2(\ell)]$ \; (both lanes) & $[2\numnodes]$ & $4 \cdot D$ \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{Backward values, per level $\ell = D, \dots, 1$}} \\
+$\cfv \gets \cfv_{\mathrm{tmpl}}$ \; (chance folded at build) & $[\numnodes]$ & 1 \\
+$\cfv.\mathrm{ia}\big(P(\ell), \strat_{\mathrm{ext}}[S(\ell)] \cdot \cfv[C(\ell)]\big)$ & $[\numnodes]$ & $4 \cdot D$ \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{Regret and average over decision edges (constant)}} \\
+$\Delta \gets s \cdot (\cfv[C_{\mathrm{reg}}] - \cfv[P_{\mathrm{reg}}])$ & decision edges & 4 \\
+$\regret.\mathrm{ia}\big(S_{\mathrm{reg}}, \reach[O_{\mathrm{reg}}] \cdot \Delta\big)$ & ${\to} [\numslots]$ & 3 \\
+$\bar{s}.\mathrm{ia}\big(S_{\mathrm{reg}}, (w \cdot \reach[M_{\mathrm{reg}}] \cdot \strat_{\mathrm{ext}}[S_{\mathrm{reg}}])_{\mathrm{f64}}\big)$ & ${\to} [\numslots]$ & 6 \\
+$\regret \gets \max(\regret, 0)$ \; (CFR$^{+}$) & $[\numslots]$ & 1 \\
+$w \mathrel{{+}{=}} 1$ \; (inside the captured body) & scalar & 1 \\
+\bottomrule
+\end{tabular}}
+\end{table}

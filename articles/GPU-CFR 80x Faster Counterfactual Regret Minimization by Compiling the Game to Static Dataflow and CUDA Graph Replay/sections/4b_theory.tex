@@ -1,0 +1,171 @@
+\section{The Compiled Iteration, Formally}
+\label{sec:theory}
+
+This section states the per-iteration dataflow as a composition of three indexed
+operators and establishes four properties of it. The folded chance representation
+computes the same values as an explicit chance chain. The branchless dual-lane update
+computes \cref{eq:lanes} exactly. The depth schedule is the shortest among schedules
+that execute edges in dependency-respecting groups. Unrescaled linear averaging has a
+representability horizon that fixes the accumulator precision. Proofs are in
+\cref{app:proofs}.
+
+\paragraph{Three indexed operators.}
+\label{sec:operators}
+
+Fix a compiled game with node set $\nodes$, $|\nodes| = \numnodes$, and edge set
+indexed $1, \dots, \numedges$. Write $p(e), c(e)$ for the parent and child of edge
+$e$ and $q(e)$ for its slot. Let $d(h)$ be the depth of node $h$ and
+\begin{equation}
+    B_\ell = \{\, e : d(p(e)) = \ell \,\},
+    \quad
+    \mathcal{D} = \{\, \ell : B_\ell \neq \emptyset \,\},
+    \quad
+    D = |\mathcal{D}|,
+    \label{eq:blocks}
+\end{equation}
+so the blocks $\{B_\ell\}_{\ell \in \mathcal{D}}$ partition the edges by parent depth.
+Let $\strat_{\mathrm{ext}} \in \R^{\numslots + 1}$ be the strategy vector extended by a
+sentinel coordinate pinned at $\strat_{\mathrm{ext}}(\bot) = 1$, and for a lane
+$i \in \{1,2\}$ define the compiled slot map
+\begin{equation}
+    q_i(e) \;=\;
+    \begin{cases}
+        q(e) & \text{edge } e \text{ is a decision edge of player } i,\\
+        \bot & \text{otherwise (opponent or chance edge)},
+    \end{cases}
+    \label{eq:slotmap}
+\end{equation}
+which is a build-time constant. Its lane-free analogue $q_{\mathrm{val}}(e)$
+($q(e)$ on decision edges, $\bot$ on chance edges) drives the backward pass.
+Three operators then generate the iteration. For a
+block $B_\ell$, a lane $i$, and vectors $x \in \R^{\numnodes}$, $y \in \R^{\numslots+1}$:
+\begin{align}
+    \fwd_{\ell,i}(x, y)(h)
+        &=
+        \begin{cases}
+            x(p(e))\, y(q_i(e)) & h = c(e),\; e \in B_\ell,\\
+            x(h) & \text{otherwise},
+        \end{cases}
+        \label{eq:opfwd} \\[2pt]
+    \bwd_{\ell}(x, y)(h)
+        &= x(h) + \sum_{e \in B_\ell \,:\, p(e) = h} y(q_{\mathrm{val}}(e))\, x(c(e)),
+        \label{eq:opbwd}
+\end{align}
+\begin{equation}
+    \acc_{\ell}(r, x, \rho)(q)
+        = r(q)
+        + \sum_{\substack{e \in B_\ell \,:\, q(e) = q \\ e \text{ a decision edge}}}\!\!
+        s(e)\,\rho_{-i(e)}(p(e))\,\big(x(c(e)) - x(p(e))\big).
+        \label{eq:opacc}
+\end{equation}
+Here $i(e)$ is the decision-edge owner, $s(e)=+1$ for player 1 and $-1$
+for player 2, and $\rho_{-i(e)}$ selects the opponent's reach lane. The vector
+$x$ holds chance-folded player-1 values, so no further chance factor is used.
+Each operator uses gathers, elementwise arithmetic, and a scatter over $|B_\ell|$
+entries, which is how \cref{alg:iteration} realizes them: \cref{eq:opfwd} as an
+indexed assignment, \cref{eq:opbwd,eq:opacc} as \texttt{index\_add}. The forward pass is
+$\fwd$ composed over $\ell \in \mathcal{D}$ in increasing depth, the backward pass is
+$\bwd$ and $\acc$ composed in decreasing depth, and \cref{eq:opfwd} runs on the doubled
+index range so both lanes advance in one call.
+
+The forward pass assigns in \cref{eq:opfwd} where the backward pass accumulates.
+Assignment is what frees it of buffer clearing. In a tree each non-root node is the
+child of exactly one edge, so within a block every destination is written exactly
+once and stale contents are unreachable. The backward operators accumulate instead, because a parent has several
+children per block.
+
+\paragraph{What the operators compute.}
+
+\begin{proposition}[Folded chance is exact]
+\label{prop:chance}
+Initialize $\cfv \gets \cfv_{\mathrm{tmpl}}$ as in \cref{eq:template} and apply
+$\bwd_\ell$ for $\ell \in \mathcal{D}$ in decreasing order, with every chance edge
+assigned multiplier $1$ through $q_{\mathrm{val}}$. Then on termination, for every node
+$h$,
+\begin{equation}
+    \cfv(h) \;=\; \sum_{z \succeq h,\; z \in \termnodes}
+        \pi_c(h \!\to\! z)\, \pi_c(h)\, \reach^{\strat}_{1,2}(h \!\to\! z)\, u(z),
+    \label{eq:chanceexact}
+\end{equation}
+that is, the chance-weighted continuation value at $h$. In particular at the root
+$\cfv$ equals the expected payoff under $\strat$, and each terminal's chance product
+$\pi_c(z)$ enters exactly once.
+\end{proposition}
+
+\Cref{prop:chance} says that folding saves work and leaves the computed values
+unchanged. The chance chain is deleted from the dynamic pass and reappears only as
+the build-time constant multiplying $u(z)$ in \cref{eq:template}.
+
+\begin{proposition}[The dual-lane update is exact and branch-free]
+\label{prop:lanes}
+For every lane $i$, block $\ell$, and edge $e \in B_\ell$, the operator $\fwd_{\ell,i}$
+of \cref{eq:opfwd} evaluated with the compiled slot map \cref{eq:slotmap} and
+$y = \strat_{\mathrm{ext}}$ satisfies the case definition of \cref{eq:lanes} at
+$c(e)$. The slot map is resolved at build time, so the per-iteration cost of the case
+distinction is zero and no per-edge predicate is evaluated during execution.
+\end{proposition}
+
+\begin{proposition}[The depth schedule is shortest]
+\label{prop:depth}
+Call a schedule \emph{dependency-respecting} if it partitions the edges into ordered
+groups such that no group contains two edges $e, e'$ with $c(e) = p(e')$, and $e$
+precedes $e'$ whenever $c(e) = p(e')$. Then:
+\begin{enumerate}[label=(\roman*),topsep=1pt,itemsep=0pt]
+    \item the partition \cref{eq:blocks} is dependency-respecting and has $D$ groups;
+    \item every dependency-respecting schedule has at least $D$ groups;
+    \item the number of operator invocations per iteration is $c_1 + c_2 D$ for
+    constants $c_1, c_2$ independent of $\numnodes$ and $\numedges$.
+\end{enumerate}
+\end{proposition}
+
+Part~(iii) is the reason iteration time is nearly flat in tree size across four
+decades (\cref{tab:matrix}). Growth enters the batch \emph{widths}, which the device
+absorbs in parallel, while the number of dispatches stays fixed. Measured on the
+suite, $c_1 \approx 31$ (the itemized dispatches of \cref{tab:opsteps} plus framework
+bookkeeping) and $c_2 = 8$. The realized schedule applies $\acc$ once, flat over all
+decision edges (\cref{sec:dataflow}), so only $\fwd$ and $\bwd$ contribute to $c_2$,
+at four operations per level each. \Cref{tab:suite} confirms that $D$ matches the
+tree depth on every game. The reference implementation's per-(stage, depth) partition
+needs up to $100$ groups where \cref{eq:blocks} needs $8$.
+
+Kim (2026) \cite{kim2026parallelizing} organizes its sequence-form iteration by
+level as well, so its critical path is likewise proportional to depth. The
+difference the timing measures is per-step work. There, one level applies a masked
+sparse product against a precomputed level matrix, whose cost is set by the sparsity
+pattern and the sparse kernel. Here, one level applies
+\cref{eq:opfwd,eq:opbwd,eq:opacc} on dense contiguous ranges with build-time
+indices. \cref{app:extra} localizes the resulting gap
+to the sparse product and the index assignment inside its per-iteration
+\texttt{normalize}.
+
+\paragraph{The averaging horizon.}
+
+Linear averaging \cite{tammelin2014solving} accumulates
+$\bar{s} \mathrel{+}= t\,\reach_{\mathrm{own}}\,\strat$ on iteration $t$ and never
+rescales. The accumulator therefore grows quadratically while each contribution stays
+linear, and in finite precision the two rates collide.
+
+\begin{proposition}[Representability horizon of unrescaled linear averaging]
+\label{prop:horizon}
+Let $S_T = \sum_{t=1}^{T} t\,x_t$ be the ideal real sum, with
+$x_t\in[0,1]$, $S_T = \Theta(T^2)$, and $x_T\ge c>0$.
+For a binary format with $p$-bit significand, while $S_T$ is in the normal range,
+\begin{equation}
+    \frac{T x_T}{\ulp(S_T)} = \Theta\!\left(\frac{2^p}{T}\right).
+    \label{eq:horizon}
+\end{equation}
+Here $\ulp$ is the spacing in the binade containing the ideal sum (the
+actual rounded accumulator may sit in a neighboring binade). Without $x_T\ge c$, only the $O(2^p/T)$ bound
+follows. Thus $2^p$ is an order-of-magnitude resolution scale and should be read as such;
+the exact stalling point depends on the rounded trajectory. A nonnegative increment is locally absorbed under
+round-to-nearest if it is strictly below half the upward spacing
+at the actual old accumulator; ties depend on the rounding rule.
+\end{proposition}
+
+GPU-CFR holds $\bar{s}$ in float64 for all update rules, while the other buffers
+and iteration arithmetic use the configured dtype. The scales
+$2^{24}\approx1.7\times10^7$ and $2^{53}\approx9\times10^{15}$ show the precision
+difference. The cost is one wider slot vector with no change to the operator
+sequence. This accumulator issue is separate from the graph-replay counter of
+\cref{sec:cudagraph}. That float32 counter represents consecutive integers exactly
+through $2^{24}$, and the host refills its starting index before each replay batch.

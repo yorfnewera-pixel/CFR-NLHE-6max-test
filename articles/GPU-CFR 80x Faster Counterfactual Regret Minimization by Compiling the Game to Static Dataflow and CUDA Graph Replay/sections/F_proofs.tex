@@ -1,0 +1,177 @@
+\section{Proofs}
+\label{app:proofs}
+
+Throughout, the compiled game is a finite tree: every node other than the root is the
+child of exactly one edge, and $d(c(e)) = d(p(e)) + 1$ for every edge $e$. We write
+$z \succeq h$ for ``$z$ is a terminal in the subtree rooted at $h$'', $\pi_c(h)$ for the
+product of chance probabilities on the root-to-$h$ path, $\pi_c(h \!\to\! z)$ for the
+product over the $h$-to-$z$ path, and $\reach^{\strat}_{1,2}(h \!\to\! z)$ for the
+product of both players' strategy probabilities over that same path. Notation and the
+operators $\fwd, \bwd, \acc$ are those of \cref{sec:operators}.
+
+\subsection{Proposition~\ref{prop:chance}: folded chance is exact}
+
+\begin{proof}
+Induct on the height $\eta(h)$ of $h$, the number of edges on the longest path from $h$
+to a terminal below it. Because $\bwd_\ell$ is applied in decreasing $\ell$, when the
+block containing $h$'s outgoing edges executes, every child of $h$ has already received
+its final value.
+
+\emph{Base case} $\eta(h) = 0$. Then $h \in \termnodes$, no block writes to $h$, and $h$
+retains its template value $\cfv_{\mathrm{tmpl}}(h) = \pi_c(h)\, u(h)$ from
+\cref{eq:template}. The right side of \cref{eq:chanceexact} has the single term
+$z = h$, with $\pi_c(h \!\to\! h) = \reach^{\strat}_{1,2}(h \!\to\! h) = 1$, so it also
+equals $\pi_c(h)\,u(h)$.
+
+\emph{Inductive step.} Let $\eta(h) = k > 0$ and assume the claim for all nodes of
+height below $k$; every child of $h$ has height at most $k-1$. Since $h \notin \termnodes$,
+its template entry is $0$, so after $\bwd_{d(h)}$ the accumulated value is exactly
+\begin{equation}
+    \cfv(h) \;=\; \sum_{e \,:\, p(e) = h} \strat_{\mathrm{ext}}\big(q_{\mathrm{val}}(e)\big)\, \cfv\big(c(e)\big),
+    \label{eq:proofrec}
+\end{equation}
+where $q_{\mathrm{val}}$ is the backward slot map of \cref{sec:operators}, which sends
+chance edges to the sentinel. Two
+cases.
+
+If $h$ is a chance node, every outgoing edge is a chance edge, so
+$\strat_{\mathrm{ext}}(q_{\mathrm{val}}(e)) = 1$ for all of them and
+$\reach^{\strat}_{1,2}(h \!\to\! z) = \reach^{\strat}_{1,2}(c(e) \!\to\! z)$ for
+$z \succeq c(e)$. Substituting the inductive hypothesis into \cref{eq:proofrec},
+\begin{equation*}
+    \cfv(h) = \sum_{e \,:\, p(e) = h} \sum_{z \succeq c(e)}
+        \pi_c(c(e) \!\to\! z)\, \pi_c(c(e))
+        \reach^{\strat}_{1,2}(c(e) \!\to\! z)\, u(z).
+\end{equation*}
+For a chance edge $e$ with probability $\gamma(e)$ we have
+$\pi_c(c(e)) = \gamma(e)\, \pi_c(h)$ and
+$\pi_c(h \!\to\! z) = \gamma(e)\, \pi_c(c(e) \!\to\! z)$, hence
+$\pi_c(c(e) \!\to\! z)\, \pi_c(c(e)) = \pi_c(h \!\to\! z)\, \pi_c(h)$ --- the factor
+$\gamma(e)$ moves between the two arguments and the product is invariant. The summand
+therefore already has the form required by \cref{eq:chanceexact}, and it is the chance
+edge's \emph{multiplier} being $1$ that prevents $\gamma(e)$ from being applied a second
+time here.
+
+If $h$ is a decision node of player $i$, each outgoing edge $e$ is a decision edge with
+$\strat_{\mathrm{ext}}(q_{\mathrm{val}}(e)) = \strat(q(e))$, and $\pi_c(c(e)) = \pi_c(h)$ because no
+chance probability sits on a decision edge. Then
+$\reach^{\strat}_{1,2}(h \!\to\! z) = \strat(q(e))\, \reach^{\strat}_{1,2}(c(e) \!\to\! z)$
+and $\pi_c(h \!\to\! z) = \pi_c(c(e) \!\to\! z)$ for $z \succeq c(e)$, so substituting
+the inductive hypothesis again gives summands of the required form.
+
+In both cases the outer sum ranges over the children of $h$, whose terminal sets
+$\{z : z \succeq c(e)\}$ partition $\{z : z \succeq h\}$ because the game is a tree.
+Every terminal below $h$ therefore contributes to $\cfv(h)$ exactly once, which is the
+no-double-counting claim, and collecting the terms yields \cref{eq:chanceexact}. Taking
+$h$ to be the root, where $\pi_c(h) = 1$ and $\pi_c(h \!\to\! z) = \pi_c(z)$, gives the
+expected payoff under $\strat$.
+\end{proof}
+
+The proof also identifies what would break the invariant: any dynamic multiplier other
+than $1$ on a chance edge would apply $\gamma(e)$ twice, once at the template and once
+in the recurrence.
+
+\subsection{Proposition~\ref{prop:lanes}: the dual-lane update is exact}
+
+\begin{proof}
+Fix a lane $i$, a block $B_\ell$, and an edge $e \in B_\ell$. By \cref{eq:opfwd},
+$\fwd_{\ell,i}$ writes $\reach_i(c(e)) = \reach_i(p(e))\, \strat_{\mathrm{ext}}(q_i(e))$
+and leaves every node that is not a child in $B_\ell$ unchanged. Compare with
+\cref{eq:lanes} by cases on the owner of $e$.
+
+If $e$ is a decision edge of player $i$, then $q_i(e) = q(e)$ by \cref{eq:slotmap} and
+$q(e) \neq \bot$, so $\strat_{\mathrm{ext}}(q_i(e)) = \strat(\mathrm{slot}(p(e), a))$
+for the action $a$ labelling $e$. The written value
+$\reach_i(p(e))\, \strat(\mathrm{slot}(p(e), a))$ is the first branch of
+\cref{eq:lanes}.
+
+Otherwise $e$ is a decision edge of the opponent or a chance edge, so $q_i(e) = \bot$
+and $\strat_{\mathrm{ext}}(\bot) = 1$ by construction. The written value is
+$\reach_i(p(e)) \cdot 1 = \reach_i(p(e))$, the second branch.
+
+The two cases are exhaustive and agree with \cref{eq:lanes} pointwise, so the operator
+computes the case definition exactly. Since $q_i$ is materialized as an index array at
+compile time, execution performs one gather at those indices and no predicate; the two
+lanes occupy disjoint halves of a length-$2\numnodes$ buffer, so a single invocation over
+the doubled index range advances both. Finally, assignment semantics are sound: within
+$B_\ell$ all parents lie at depth $\ell$ and all children at depth $\ell+1$, and in a
+tree each child has a unique incoming edge, so no destination is written twice and each
+$\reach_i(p(e))$ read in block $\ell$ was written in block $\ell - 1$ (or initialized at
+the root).
+\end{proof}
+
+\subsection{Proposition~\ref{prop:depth}: the depth schedule is shortest}
+
+\begin{proof}
+(i) Let $e, e'$ satisfy $c(e) = p(e')$. Then $d(p(e')) = d(c(e)) = d(p(e)) + 1$, so $e$
+and $e'$ fall in blocks $B_\ell$ and $B_{\ell+1}$ with $\ell = d(p(e))$: they are never
+in the same group, and executing blocks in increasing $\ell$ places $e$ before $e'$.
+The blocks are nonempty by the definition of $\mathcal{D}$ in \cref{eq:blocks} and there
+are $|\mathcal{D}| = D$ of them.
+
+(ii) Let $\ell_{\min} < \dots < \ell_{\max}$ enumerate $\mathcal{D}$. Pick any edge
+$e_{\max} \in B_{\ell_{\max}}$ and walk from $p(e_{\max})$ to the root, collecting the
+incoming edge of each node. This produces edges $e_{\ell}$ with $d(p(e_\ell)) = \ell$
+for every $\ell < \ell_{\max}$ with $B_\ell \neq \emptyset$, chained so that
+$c(e_\ell) = p(e_{\ell+1})$ whenever both are on the walk. Every depth below
+$\ell_{\max}$ that carries an edge is met, because the walk passes through one node per
+depth and that node's incoming edge has parent depth one less. The walk therefore yields
+a chain of $D$ edges, consecutive ones related by $c(e) = p(e')$. Any
+dependency-respecting schedule must put each pair in different groups and in the chain's
+order, so it uses at least $D$ groups.
+
+(iii) By \cref{eq:opfwd,eq:opbwd,eq:opacc} each block contributes a fixed number of
+operator invocations --- one $\fwd$ forward, one $\bwd$ and one $\acc$ backward, each a
+constant number of gather/multiply/scatter calls --- and the remaining work (regret
+matching, template initialization, the averaging and clamp steps of
+\cref{alg:iteration}) is a fixed sequence independent of the block count. Writing $c_2$
+for the per-block count and $c_1$ for the rest gives $c_1 + c_2 D$. Both constants are
+independent of $\numnodes$ and $\numedges$: tree size enters only the \emph{length} of the
+index arrays each invocation is given.
+\end{proof}
+
+On the measured suite the fitted constants are $c_1 \approx 31$ and
+$c_2 \approx 8$ Aten operations, and the regression gate of \cref{sec:correctness}
+asserts the count stays under $40 + 10D$.
+
+\subsection{Proposition~\ref{prop:horizon}: the averaging horizon}
+
+\begin{proof}
+For an ideal real value $S$ in the normal range, let $2^k\le S<2^{k+1}$.
+Its binade spacing is $\ulp(S)=2^{k-p+1}$, hence
+$2^{-p}S<\ulp(S)\le 2^{1-p}S$.
+The assumption $S_T=\Theta(T^2)$ therefore gives
+$\ulp(S_T)=\Theta(T^2 2^{-p})$. Since $cT\le T x_T\le T$,
+dividing proves \cref{eq:horizon}. Without the lower bound on $x_T$,
+the numerator is only $O(T)$, giving the stated upper bound.
+These statements concern the ideal sum. The recursively rounded sum can
+depart from pointwise monotonicity and from any exact crossing constant.
+
+For local rounding, let $\widehat{S}_{T-1}$ be the actual nonnegative,
+finite floating-point accumulator and let its next larger representable
+value also be finite. Define its upward spacing by
+\[
+    g_T=\operatorname{nextUp}(\widehat{S}_{T-1})-\widehat{S}_{T-1}.
+\]
+For the actual nonnegative increment $\widehat{\delta}_T$ supplied to the
+addition, round-to-nearest yields
+\[
+    \operatorname{fl}(\widehat{S}_{T-1}+\widehat{\delta}_T)
+    =\widehat{S}_{T-1}
+    \quad\text{if}\quad 0\le\widehat{\delta}_T<g_T/2.
+\]
+At equality, ties are resolved by the format's tie-breaking rule.
+This criterion uses the old rounded accumulator.
+A later, larger increment can register, so absorption on one step does not
+establish permanent stagnation. Subnormal spacings and overflow lie outside
+the normal-range asymptotic argument above.
+\end{proof}
+
+Uniform averaging also has finite-resolution loss: with constant unit
+increments, a float32 sum reaches $2^{24}$ and then stays there under
+round-to-nearest, ties-to-even, because its upward spacing is $2$.
+More generally, an ideal uniform sum of order $T$ with constant-order
+increments also has increment-to-spacing ratio $\Theta(2^p/T)$.
+GPU-CFR therefore uses float64 strategy accumulation for every update rule,
+including uniform averaging. This widens accumulator resolution without
+changing the precision of the increments or the device-side counter.

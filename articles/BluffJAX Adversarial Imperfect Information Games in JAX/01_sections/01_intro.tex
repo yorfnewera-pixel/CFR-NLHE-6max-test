@@ -1,0 +1,89 @@
+
+
+\newcommand{\herowidth}{0.18}
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/kuhn.pdf}
+    \caption{{ Kuhn Poker}}
+\end{subfigure}
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/leduc.pdf}
+    \caption{Leduc Poker}
+\end{subfigure}
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/tul.pdf}
+    \caption{{\centering Texas Hold'Em Limit Poker}}
+\end{subfigure}
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/tunl.pdf}
+    \caption{{\centering Texas Hold'Em No-Limit Poker}}
+\end{subfigure}
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/five_card_draw.pdf}
+    \caption{Five Card Draw}
+\end{subfigure}
+
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/seven_card_stud.pdf}
+    \caption{Seven Card Stud}
+\end{subfigure}
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/goofspiel.pdf}
+    \caption{Goofspiel}
+\end{subfigure}
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/werewolf.pdf}
+    \caption{Werewolf}
+\end{subfigure}
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/bluff.pdf}
+    \caption{Bluff}
+\end{subfigure}
+\begin{subfigure}[t]{\herowidth\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{02_images/hero/kemps.pdf}
+    \caption{Kemps}
+\end{subfigure}
+
+\caption{Games in BluffJAX.}
+\label{fig:all_games}
+\end{figure}
+
+
+\section{Introduction}
+
+
+The development of algorithms that can achieve superhuman performance in games with intractably large state-action spaces has been a driving force in Artificial Intelligence (AI) research for decades~\citep{mnih2015human,silver2016mastering,silver2017mastering}. Imperfect information games present unique challenges: in addition to large state and action spaces, inaccessibility to information and opponent strategy severely hampers standard learning methods like fictitious self-play, value estimation, and tree search - which can be seen in games such as Hold'Em Poker~\citep{brown2020combining}, Diplomacy~\citep{meta2022human}, and Dota 2~\citep{berner2019dota}.
+
+One bottleneck for scaling large-scale RL systems in such domains is the availability of data. High-speed simulators that can leverage hardware accelerators and collect diverse data from parallelized environments are a crucial ingredient in modern RL research. In particular, JAX~\citep{frostig2019compiling} has gained popularity among machine learning researchers in recent years by utilizing the XLA compiler infrastructure for JIT (just-in-time) compilation and automatic differentiation of Python functions. 
+
+\begin{wrapfigure}{r}{0.5\textwidth}
+    \centering
+    \includegraphics[width=0.5\textwidth]{02_images/hero/hero.pdf}
+    \caption{Our philosophy and design criteria.}
+    \label{fig:hero}
+\end{wrapfigure}
+
+In this work, we introduce \textbf{BluffJAX}, which is (to the best of our knowledge) the first open-source hardware-accelerated JAX suite focused primarily on imperfect information games. Our benchmark include well-studied games such as Texas Hold'Em Poker variants and Goofspiel, while also introducing games that have not been studied in RL research thus far, such as Bluff, Kemps, and multi-round Werewolf. We hope that providing high-speed implementations of well-known games will help alleviate the reproducibility crisis in RL research, as well as introduce new challenges to the RL community that will foster novel research directions in game-theoretic RL and search methods. All code is open-source and available at \url{https://github.com/bluffjax/bluffjax}.
+
+To validate the functionality and scalability of our suite, we benchmark the speed and memory usage of all 10 implemented games across varying numbers of parallel environments in single-GPU and multi-GPU settings. We also analyze the scaling performance of BluffJAX against related game libraries. We provide algorithm baseline results for some well-studied games to motivate our claim that the implementations use canonical game mechanics and are compatible with existing algorithms. Additionally, we include some pre-trained baseline models that we hope will provide users of BluffJAX with a predefined standard by which they can evaluate their own experiments. We implement fully JIT-compatible algorithms for certain games, including Counterfactual Regret Minimization~\citep{zinkevich2007regret} (CFR) and exploitability metrics for Kuhn Poker and Leduc Poker. In large games, it is typically intractable to expand the entire game tree in order to perform CFR; thus, we also implement JIT-compatible deep RL and tree search algorithms.
+
+Figure~\ref{fig:hero} outlines out philosophy and design criteria for BluffJAX. The contributions of our library are summarized as follows:
+\begin{itemize}
+    \item \textbf{Speed and vectorization:} BluffJAX emphasizes high environment transition throughput rates using efficient game branching logic and leverages JAX-native parallelization, JIT compilation, and on-GPU processing. 
+    \item \textbf{Simplicity:} We use a simple API and well-documented code for ease of use.
+    \item \textbf{Extensibility:} Our library is structured to enable easy addition of new games and mechanics.
+    \item \textbf{Reproducibility:} We provide implementations of well-known game-solving and RL algorithms as well as baseline models to give users a reproducible starting point for their research directions.
+    \item \textbf{Integration:} We include wrappers and helper functions to ease the on-boarding of users already familiar with other RL libraries.
+    \item \textbf{Centered on Deception and Hidden Information:} To the best of our knowledge, GPU-accelerated implementations of imperfect information games remains a mostly-unfulfilled niche within the ecosystem of RL environment libraries. We aim to fill this gap by providing implementations of both well-known and new games.
+\end{itemize}

@@ -1,0 +1,572 @@
+\appendix
+\section{Games in BluffJAX}\label{supp:games}
+\subsection{Kuhn Poker}
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/kuhn.pdf}
+    \label{fig:supp_kuhn}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            \multicolumn{1}{l}{Environment}  &\multicolumn{1}{l}{Kuhn Poker}\\ \hline
+            Number of players (n) & 2\\
+            Observation size & 9 \\
+            Number of actions & 2 \\
+            Number of JAX branches & 1\\
+            Metric & Exploitability\\
+            API Type & AEC\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} Kuhn Poker is a well-studied two-player zero-sum game~\citep{kuhn1953extensive}. There are 3 cards: Jack, Queen, and King. At the start of a round, players are randomly assigned one private card each, and each player antes 1. Each player then gets one chance to bet. If player 1 raises, player 2 can either call or fold. If player 1 checks, player 2 can check or raise. If player 2 raises after player 1 checked, player 1 can either call or fold. If either player folds, the other player wins the pot. If neither player folds, there is a showdown and the higher card wins.
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        \multicolumn{1}{l}{Input feature}  &\multicolumn{1}{l}{Feature Dimension} &\multicolumn{1}{l}{Feature type} \\ \hline
+        Agent's private card & 3 & One-hot \\
+        Self chips in pot & 2 & One-hot \\
+        Opponent chips in pot & 2 & One-hot \\
+        Player order (first or second to act) & 2 & One-hot \\
+        \hline
+        Total & 9 \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        \multicolumn{1}{l}{Action}  &\multicolumn{1}{l}{Logit} \\ \hline
+        Check/fold & 0  \\
+        Raise/call & 1  \\
+        \hline
+        Total & 2 \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:} Agents receive net chips gained as terminal rewards.
+
+
+\subsection{Leduc Hold'em}
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/leduc.pdf}
+    \label{fig:supp_leduc}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            Environment & Leduc Hold'em\\ \hline
+            Number of players (n) & 2\\
+            Observation size & 36 \\
+            Number of actions & 3 \\
+            Number of JAX branches & 3\\
+            Metric & Exploitability\\
+            API Type & AEC\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} Two-player poker with a 6-card deck (two J, two Q, two K), one private card per player, and one public card revealed after round 1. Players bet over two rounds. Best hand (pair beats high card) wins at showdown, or a fold ends the hand early.
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        Input feature & Feature Dimension & Feature type \\ \hline
+        Agent private rank (J/Q/K) & 3 & One-hot \\
+        Public rank (if revealed) & 3 & One-hot \\
+        Self ante bucket (0--14+) & 15 & One-hot \\
+        Opponent ante bucket (0--14+) & 15 & One-hot \\
+        \hline
+        Total & 36 & \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{ll}
+    \hline
+        Action & Logit \\ \hline
+        Fold & 0 \\
+        Call/Check & 1 \\
+        Raise & 2 \\
+        \hline
+        Total & 3 \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:}
+Terminal reward is net chips relative to starting stack (non-terminal reward is 0).
+
+
+\subsection{Texas Limit Hold'em}
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/tul.pdf}
+    \label{fig:supp_tul}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            Environment & Texas Limit Hold'em\\ \hline
+            Number of players (n) & 2--10 (common setting)\\
+            Observation size & 72 + n \\
+            Number of actions & 4 \\
+            Number of JAX branches & 4\\
+            Metric & Chips/Hand\\
+            API Type & AEC\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} Multi-player limit hold'em with fixed betting amounts and blinds. Players maximize expected chip gain by betting/folding through preflop, flop, turn, and river.
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        Input feature & Feature Dimension & Feature type \\ \hline
+        Private + visible public cards & 52 & Binary \\
+        Raise-count history (4 rounds, 0-4 raises each) & 20 & One-hot \\
+        Position relative to small blind & n & One-hot \\
+        \hline
+        Total & 72 + n & \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{ll}
+    \hline
+        Action & Logit \\ \hline
+        Call & 0 \\
+        Raise & 1 \\
+        Fold & 2 \\
+        Check & 3 \\
+        \hline
+        Total & 4 \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:}
+Rewards are terminal chip payoffs normalized by big blind.
+
+
+\subsection{Texas No-Limit Hold'em}
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/tunl.pdf}
+    \label{fig:supp_tunl}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            Environment & Texas No-Limit Hold'em\\ \hline
+            Number of players (n) & 2-10 (common setting)\\
+            Observation size & 54 \\
+            Number of actions & 5 \\
+            Number of JAX branches & 5\\
+            Metric & Chips/Hand\\
+            API Type & AEC\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} No-limit Hold'em variant with discrete raise abstractions (half-pot, pot, all-in). Agents optimize chip profit over each hand.
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        Input feature & Feature Dimension & Feature type \\ \hline
+        Private + visible public cards & 52 & Binary \\
+        Current player's chips in pot & 1 & Scalar \\
+        Max chips in pot among players & 1 & Scalar \\
+        \hline
+        Total & 54 & \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{ll}
+    \hline
+        Action & Logit \\ \hline
+        Check/Call & 0 \\
+        Raise half-pot & 1 \\
+        Raise pot & 2 \\
+        All-in & 3 \\
+        Fold & 4 \\
+        \hline
+        Total & 5 \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:}
+Rewards are terminal net chips gained (chips won minus chips invested).
+
+
+\subsection{5 Card Draw}
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/five_card_draw.pdf}
+    \label{fig:supp_five}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            Environment & 5 Card Draw\\ \hline
+            Number of players (n) & 2--10\\
+            Observation size & 54 \\
+            Number of actions & 37 \\
+            Number of JAX branches & 11\\
+            Metric & Chips/Hand\\
+            API Type & AEC\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} Players play one draw-poker hand with a betting round, a draw phase, and a final betting round, maximizing expected chip gain.
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        Input feature & Feature Dimension & Feature type \\ \hline
+        Current player 5-card hand (in 52-card index space) & 52 & Binary \\
+        Current player's chips in pot & 1 & Scalar \\
+        Max chips in pot among players & 1 & Scalar \\
+        \hline
+        Total & 54 & \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{ll}
+    \hline
+        Action & Logit \\ \hline
+        Check/Call, Raise 1/2 Pot, Raise Pot, All-in, Fold & 0--4 \\
+        Draw pattern (keep/discard over 5 cards) & 5--36 \\
+        \hline
+        Total & 37 \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:}
+Rewards are terminal net chips gained.
+
+
+\subsection{7 Card Stud}
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/seven_card_stud.pdf}
+    \label{fig:supp_seven}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            Environment & 7 Card Stud\\ \hline
+            Number of players (n) & 2--10\\
+            Observation size & $52 + 208(n-1) + 25 + n$ \\
+            Number of actions & 4 \\
+            Number of JAX branches & 4\\
+            Metric & Chips/Hand\\
+            API Type & AEC\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} Stud poker with antes/bring-in and five betting streets. Players maximize expected chip return by betting and showing down strongest 7-card hand among active players.
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        Input feature & Feature Dimension & Feature type \\ \hline
+        Own 7 cards (global deck index) & 52 & Binary \\
+        Opponents' visible upcards (4 slots each opponent) & $208(n-1)$ & One-hot blocks \\
+        Raise-count history (5 rounds, 0--4) & 25 & One-hot \\
+        Position relative to bring-in & n & One-hot \\
+        \hline
+        Total & $52 + 208(n-1) + 25 + n$ & \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{ll}
+    \hline
+        Action & Logit \\ \hline
+        Call & 0 \\
+        Raise & 1 \\
+        Fold & 2 \\
+        Check & 3 \\
+        \hline
+        Total & 4 \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:}
+Terminal payoff is net chips normalized by big bet.
+
+\subsection{Goofspiel}
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/goofspiel.pdf}
+    \label{fig:supp_goof}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            Environment & Goofspiel\\ \hline
+            Number of players (n) & 2\\
+            Observation size & 39 \\
+            Number of actions & 13 \\
+            Number of JAX branches & 1\\
+            Metric & Return/Hand (or Win Rate)\\
+            API Type & Parallel\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} Both players bid cards simultaneously for sequential prize cards. Highest unique bid wins prize points; ties discard the prize.
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        Input feature & Feature Dimension & Feature type \\ \hline
+        Current prize card & 13 & One-hot \\
+        Self cards already used & 13 & Binary \\
+        Opponent cards already used & 13 & Binary \\
+        \hline
+        Total & 39 & \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{ll}
+    \hline
+        Action & Logit \\ \hline
+        Play bid card (rank 1--13) & 0--12 \\
+        \hline
+        Total & 13 \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:}
+Per-round reward is prize value to the unique highest bidder; terminal return is cumulative points.
+
+
+\subsection{Bluff}
+
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/bluff.pdf}
+    \label{fig:supp_bluff}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            Environment & Bluff\\ \hline
+            Number of players (n) & $\geq 3$\\
+            Observation size & $5 \cdot \text{deck\_size} + 3$ (default 263) \\
+            Number of actions & 13 \\
+            Number of JAX branches & 10\\
+            Metric & Win Rate\\
+            API Type & AEC\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} Turn-based social bluffing game (Cheat/I Doubt It). Players make claims, play hidden cards, and other players may challenge. Goal is to empty your hand first.
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        Input feature & Feature Dimension & Feature type \\ \hline
+        Pile claims & $52$ & Thermometer \\
+        Pile size & $52$ & Thermometer \\
+        Own hand counts & $52$ & Thermometer \\
+        Claimant hand size (challenge phase) & $52$ & Thermometer \\
+        Current claim size (challenge phase) & $52$ & Thermometer \\
+        Phase id (claim/play/challenge) & 3 & One-hot \\
+        \hline
+        Total & $5 \cdot \text{deck\_size} + 3$ & \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{ll}
+    \hline
+        Action & Logit \\ \hline
+        Phase-dependent action index & 0--12 \\
+        \hline
+        Total & 13 \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:} Shaped rewards are used for successful/failed challenges and card outcomes; winner also receives terminal bonus.
+
+\subsection{Werewolf}
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/werewolf.pdf}
+    \label{fig:supp_werewolf}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            Environment & Werewolf\\ \hline
+            Number of players (n) & 6 (current implementation)\\
+            Observation size & $7 + 6n$ \\
+            Number of actions & $n + 1$ \\
+            Number of JAX branches & 7\\
+            Metric & Win Rate\\
+            API Type & AEC\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} Hidden-role social deduction game with phases Night $\rightarrow$ Accuse $\rightarrow$ Vote. Humans try to eliminate all werewolves; werewolves try to reach parity with humans.
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        Input feature & Feature Dimension & Feature type \\ \hline
+        Own role & 4 & One-hot \\
+        Current phase & 3 & One-hot \\
+        Alive players (relative indexing) & n & Binary \\
+        Werewolf teammate info (if werewolf) & n & Binary \\
+        Seer belief/results (if seer) & $3n$ & Ternary one-hot per player \\
+        Accusation targets this round & n & Binary \\
+        \hline
+        Total & $7 + 6n$ & \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{ll}
+    \hline
+        Action & Logit \\ \hline
+        Relative target player index & $0 \ldots n-1$ \\
+        No-op & $n$ \\
+        \hline
+        Total & $n+1$ \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:} At terminal state, all winners get +10 and all losers get -10.
+
+\subsection{Kemps}
+
+\begin{minipage}{0.3\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{02_images/hero/kemps.pdf}
+    \label{fig:supp_kemps}
+\end{minipage}
+\begin{minipage}{0.48\textwidth}
+    \begin{center}
+        \begin{tabular}{ll}
+        \hline
+            Environment & Kemps\\ \hline
+            Number of players (n) & 4,6,8,\dots (even)\\
+            Observation size & $52(n+1) + n \cdot \text{comm}$ (default deck) \\
+            Number of actions & $172 \cdot \text{comm}$ \\
+            Number of JAX branches & 1\\
+            Metric & Win Rate\\
+            API Type & Parallel\\
+            \hline
+        \end{tabular}
+    \end{center}
+\end{minipage}
+
+\textbf{Objective:} Partnership card game with simultaneous moves. Teams try to form four-of-a-kind and correctly declare KEMPS (or STOP KEMPS against opponents).
+
+\textbf{Observations}
+\begin{center}
+    \begin{tabular}{lll}
+    \hline
+        Input feature & Feature Dimension & Feature type \\ \hline
+        Private hand & $52$ & Binary \\
+        Public center cards & 52 & Binary \\
+        Relative communication signals (all players) & $n \cdot \text{comm}$ & One-hot \\
+        \hline
+        Total & $52(n+1) + n \cdot \text{comm}$ & \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Actions}
+\begin{center}
+    \begin{tabular}{ll}
+    \hline
+        Action & Logit \\ \hline
+        Rank swap (lose-rank, gain-rank) & $0 \ldots 168$ \\
+        No-op & 169 \\
+        Declare KEMPS & 170 \\
+        Declare STOP KEMPS & 171 \\
+        Each paired with communication signal & $\times \text{comm}$ \\
+        \hline
+        Total & $172 \cdot \text{comm}$ \\
+        \hline
+    \end{tabular}
+\end{center}
+
+\textbf{Rewards:} Terminal team reward is +1/-1 based on declaration correctness or correctness of spotting opposing team's signal

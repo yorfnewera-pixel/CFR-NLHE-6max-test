@@ -1,0 +1,170 @@
+% Arch-2: one compiled CFR+ iteration on the same 11-node example game as
+% Figure 2 (8 decision-edge slots, depth segments 1|2|4|4). Single column: the
+% four phases stack top to bottom in execution order inside one rounded frame
+% (the captured CUDA graph), with a left return edge closing the cycle. Every
+% solver buffer is a strip of cells and every phase is arrows between specific
+% cells. Arcs are colored by the edge's acting owner (gray chance, teal P1,
+% violet P2) and staggered in height within each group; the reach buffer is one
+% strip of split cells (teal top half = player 1 lane, violet bottom half =
+% player 2 lane) because one index set advances both lanes. Formulas live in
+% the body text, Alg. 1, and Table 1 (tab:opsteps).
+\begin{minipage}[b]{0.46\linewidth}\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+    font=\sffamily\small,
+    flow/.style={-{Stealth[length=2.6mm]}, line width=1.4pt, black!55},
+    arr/.style={-{Stealth[length=1.6mm]}, line width=0.9pt, black!60},
+    carc/.style={-{Stealth[length=1.6mm]}, line width=1.0pt, black!50},
+    tarc/.style={-{Stealth[length=1.6mm]}, line width=1.0pt, teal!70!black},
+    varc/.style={-{Stealth[length=1.6mm]}, line width=1.0pt, violet!70!black},
+    sarr/.style={-{Stealth[length=1.5mm]}, line width=0.9pt, orange!75!black},
+    note/.style={font=\sffamily\small, text=black!55},
+    phaselabel/.style={font=\sffamily\small\bfseries, text=black!65},
+    badge/.style={circle, fill=orange!85!black, text=white,
+                  font=\sffamily\small\bfseries, inner sep=1.0pt}
+]
+\def\cw{0.58}
+\def\sx{0.82}
+% strip helpers: slot strips have 8 cells (+1 sentinel), node strips 11 cells
+% with depth separators after cells 1, 3, 7 and dark terminal cells at
+% BFS positions 4, 6, 7, 8, 9, 10.
+\newcommand{\slotstrip}[3]{% x, y-bottom, fill
+  \foreach \i in {0,...,7}
+    \draw[black!60, fill=#3] ({#1+\i*\cw},#2) rectangle ++(\cw,\cw);
+}
+\newcommand{\nodestrip}[3]{% x, y-bottom, base fill (terminals dark)
+  \foreach [count=\i from 0] \c in
+    {#3, #3, #3, #3, black!55, #3, black!55, black!55, black!55, black!55, black!55}
+    \draw[black!60, fill=\c] ({#1+\i*\cw},#2) rectangle ++(\cw,\cw);
+  \foreach \s in {0, 1, 3, 7, 11}
+    \draw[black!85, line width=1.0pt] ({#1+\s*\cw},#2-0.03) -- ++(0,\cw+0.06);
+}
+% dual-lane reach buffer as one strip of split cells: one index set advances
+% both players, so each cell holds a teal (player 1) and violet (player 2) half
+\newcommand{\dualstrip}[2]{% x, y-bottom
+  \foreach \i in {0,...,10}{
+    \fill[violet!25] ({#1+\i*\cw},#2) rectangle ++(\cw,0.5*\cw);
+    \fill[teal!28]   ({#1+\i*\cw},{#2+0.5*\cw}) rectangle ++(\cw,0.5*\cw);
+    \draw[black!60]  ({#1+\i*\cw},#2) rectangle ++(\cw,\cw);
+  }
+  \foreach \s in {0, 1, 3, 7, 11}
+    \draw[black!85, line width=1.0pt] ({#1+\s*\cw},#2-0.03) -- ++(0,\cw+0.06);
+}
+
+% ================= phase 1 (top): regret matching =================
+\node[badge] at (1.00,13.30) {1};
+\node[phaselabel, anchor=west] at (1.22,13.30) {regret matching};
+\node[note, anchor=east] at (\sx-0.10,12.74) {$\regret$};
+\slotstrip{\sx}{12.45}{orange!30}
+\node[note, anchor=east] at (\sx-0.10,11.64) {$\strat_{\mathrm{ext}}$};
+\slotstrip{\sx}{11.35}{green!25}
+% sentinel cell appended to the strategy strip
+\draw[black!60, fill=black!45] ({\sx+8*\cw},11.35) rectangle ++(\cw,\cw);
+\node[note] at ({\sx+8.5*\cw},11.13) {$\bot$};
+% one arrow per slot, regret -> strategy; none enters the sentinel
+\foreach \i in {0,...,7}
+  \draw[arr] ({\sx+(\i+0.5)*\cw},12.40) -- ({\sx+(\i+0.5)*\cw},11.98);
+\node[note, anchor=west] at ({\sx+8.3*\cw},12.19) {RM$^{+}$};
+\draw[flow] (3.25,11.18) -- (3.25,10.78);
+
+% ================= phase 2: forward reach =================
+\node[badge] at (1.00,10.66) {2};
+\node[phaselabel, anchor=west] at (1.22,10.66) {forward reach $\times D$};
+\node[note, anchor=east] at (\sx-0.10,9.31) {$\reach_{1}$};
+\node[note, anchor=east] at (\sx-0.10,9.00) {$\reach_{2}$};
+\dualstrip{\sx}{8.85}
+% parent -> child arcs above the strip, colored by the edge's acting owner;
+% heights restart per owner group and grow within it. The small square at each
+% apex is the gathered strategy factor: green = player slot, dark = sentinel.
+\newcommand{\fwdarc}[6]{% parent, parent offset, child, height, arc style, factor
+  \draw[#5] ({\sx+(#1+#2)*\cw},9.49)
+    .. controls ({\sx+(#1+#2)*\cw},9.49+#4) and ({\sx+(#3+0.5)*\cw},9.49+#4) ..
+    ({\sx+(#3+0.5)*\cw},9.49);
+  \fill[#6, draw=black!70, line width=0.5pt]
+    ({(\sx+(#1+#2)*\cw)/2+(\sx+(#3+0.5)*\cw)/2-0.08},{9.49+0.75*#4-0.08})
+    rectangle ++(0.16,0.16);
+}
+% all ten edges are drawn (2 chance + 8 decision)
+\fwdarc{0}{0.35}{1}{0.45}{carc}{black!45}
+\fwdarc{0}{0.65}{2}{0.60}{carc}{black!45}
+\fwdarc{1}{0.35}{3}{0.45}{tarc}{green!45}
+\fwdarc{1}{0.65}{4}{0.60}{tarc}{green!45}
+\fwdarc{2}{0.35}{5}{0.75}{tarc}{green!45}
+\fwdarc{2}{0.65}{6}{0.90}{tarc}{green!45}
+\fwdarc{3}{0.35}{7}{0.45}{varc}{green!45}
+\fwdarc{3}{0.65}{8}{0.60}{varc}{green!45}
+\fwdarc{5}{0.35}{9}{0.75}{varc}{green!45}
+\fwdarc{5}{0.65}{10}{0.90}{varc}{green!45}
+\draw[flow] (3.25,8.68) -- (3.25,8.28);
+
+% ================= phase 3: backward values =================
+\node[badge] at (1.00,8.05) {3};
+\node[phaselabel, anchor=west] at (1.22,8.05) {backward values $\times D$};
+\node[note, anchor=east] at (\sx-0.10,7.54) {$\cfv_{\mathrm{tmpl}}$};
+\nodestrip{\sx}{7.25}{white}
+\node[note, anchor=east] at (\sx-0.10,6.54) {$\cfv$};
+\nodestrip{\sx}{6.25}{gray!15}
+\draw[arr] ({\sx+4.5*\cw},7.20) -- node[note, right=0.4mm] {copy} ({\sx+4.5*\cw},6.88);
+% child -> parent arcs under the value strip (reverse sweep), same edge colors
+\newcommand{\bwdarc}[6]{% child, parent, parent offset, height, arc style, factor
+  \draw[#5] ({\sx+(#1+0.5)*\cw},6.21)
+    .. controls ({\sx+(#1+0.5)*\cw},6.21-#4) and ({\sx+(#2+#3)*\cw},6.21-#4) ..
+    ({\sx+(#2+#3)*\cw},6.21);
+  \fill[#6, draw=black!70, line width=0.5pt]
+    ({(\sx+(#1+0.5)*\cw)/2+(\sx+(#2+#3)*\cw)/2-0.08},{6.21-0.75*#4-0.08})
+    rectangle ++(0.16,0.16);
+}
+\bwdarc{1}{0}{0.35}{0.45}{carc}{black!45}
+\bwdarc{2}{0}{0.65}{0.60}{carc}{black!45}
+\bwdarc{3}{1}{0.35}{0.45}{tarc}{green!45}
+\bwdarc{4}{1}{0.65}{0.60}{tarc}{green!45}
+\bwdarc{5}{2}{0.35}{0.75}{tarc}{green!45}
+\bwdarc{6}{2}{0.65}{0.90}{tarc}{green!45}
+\bwdarc{7}{3}{0.35}{0.45}{varc}{green!45}
+\bwdarc{8}{3}{0.65}{0.60}{varc}{green!45}
+\bwdarc{9}{5}{0.35}{0.75}{varc}{green!45}
+\bwdarc{10}{5}{0.65}{0.90}{varc}{green!45}
+\draw[flow] (3.25,5.00) -- (3.25,4.68);
+
+% ================= phase 4 (bottom): flat regret update =================
+\node[badge] at (1.00,4.50) {4};
+\node[phaselabel, anchor=west] at (1.22,4.50) {regret update, flat};
+\node[note, anchor=east] at (\sx-0.10,3.99) {$\regret$};
+\slotstrip{\sx}{3.70}{orange!30}
+\node[note, anchor=east] at (\sx-0.10,2.59) {$\cfv$};
+\nodestrip{\sx}{2.30}{gray!15}
+% one scatter over all decision edges at once: child value cell -> its slot
+\foreach \c/\s in {3/0, 4/1, 5/2, 6/3, 7/4, 8/5, 9/6, 10/7}
+  \draw[sarr] ({\sx+(\c+0.5)*\cw},2.92)
+    to[bend left=12] ({\sx+(\s+0.5)*\cw},3.66);
+
+% ================= the iteration cycle =================
+\draw[flow] (-0.30,4.30) -- (-0.30,12.50)
+  node[note, midway, rotate=90, above=0.6mm] {next iteration};
+% the whole cycle is one captured CUDA graph
+\begin{scope}[on background layer]
+\node[draw=black!30, rounded corners=4pt, fill=black!2, inner sep=1.2mm,
+      fit={(-0.62,13.50) (7.38,1.92)}] (graphframe) {};
+\end{scope}
+\node[note, anchor=south east] at ($(graphframe.south east)+(-0.12,-0.02)$)
+  {one CUDA graph};
+\end{tikzpicture}}
+\caption{One compiled CFR$^{+}$ iteration on the example game of
+\cref{fig:archpipeline}, stacked in execution order inside the captured CUDA
+graph (rounded frame). Arcs are colored by the acting owner of their edge (gray
+chance, teal P1, violet P2); each apex square is the gathered strategy factor
+(green) or the sentinel (dark).}
+\Description{Four phases stacked top to bottom inside one rounded frame labeled
+one CUDA graph. Phase one shows eight parallel arrows from an orange regret
+strip to a green strategy strip with an extra dark sentinel cell that receives
+no arrow. Phase two shows a reach strip of split teal and violet cells with
+staggered arcs from parent cells to child cells, colored gray, teal, or violet
+by the acting owner; each arc carries a small green square for a strategy
+factor or a dark square for the sentinel. Phase three shows a template strip
+copied into a value strip, with the same colored arcs folding child cells back
+into parent cells. Phase four shows a gently curved fan of orange arrows
+scattering child-value cells into the regret strip. A thick upward arrow on the
+left labeled next iteration closes the cycle.}
+\label{fig:archdataflow}
+\end{minipage}
+\end{figure}
