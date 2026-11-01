@@ -6,6 +6,16 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+    {
+        let mut file = fs::File::create(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    fs::rename(temporary, path)
+}
+
 fn arg(args: &[String], name: &str, default: &str) -> String {
     args.iter().position(|a| a == name).map(|i| args[i + 1].clone()).unwrap_or_else(|| default.to_string())
 }
@@ -23,12 +33,24 @@ impl Log {
         let elapsed = self.started.elapsed().as_secs_f64();
         eprintln!("[{elapsed:9.1}s] {stage} {detail}");
         let text = format!("{{\"stage\": \"{stage}\", \"detail\": \"{detail}\", \"elapsed_seconds\": {elapsed:.1}}}\n");
-        fs::write(&self.status, text).expect("status");
+        atomic_write(&self.status, text.as_bytes()).expect("status");
     }
 }
 
 fn write_table(path: &Path, street: u32, k: u32, keys: &[u128], assignment: &[u16]) {
     BucketTable::new(street, k, keys, assignment).write(path).expect("table");
+}
+
+fn code_revision() -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|revision| revision.trim().to_owned())
+        .filter(|revision| !revision.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 fn bucket_summary(k: usize, assignment: &[u16], weight: &[u64], equity: &[f32]) -> String {
@@ -58,8 +80,8 @@ fn build(args: &[String]) {
     let log = Log { started: Instant::now(), status: out.join("status.json") };
     let deck = deck(ranks);
     let mut summary = vec![format!(
-        "\"format\": \"{}\", \"ranks\": {ranks}, \"deck_cards\": {}, \"bins\": {bins}, \"seed\": {seed}, \"ks\": {ks:?}, \"threads\": {}",
-        if abstraction == "potential" { "hu20-potential-aware-emd-v1" } else { "hu20-equity-buckets-v1" }, deck.len(), rayon::current_num_threads())];
+        "\"format\": \"{}\", \"ranks\": {ranks}, \"deck_cards\": {}, \"bins\": {bins}, \"seed\": {seed}, \"ks\": {ks:?}, \"threads\": {}, \"code_revision\": \"{}\"",
+        if abstraction == "potential" { "hu20-potential-aware-emd-v1" } else { "hu20-equity-buckets-v1" }, deck.len(), rayon::current_num_threads(), code_revision())];
 
     log.stage("river-equity", "computing");
     let river = RiverTable::build(&deck);
@@ -67,28 +89,52 @@ fn build(args: &[String]) {
     if abstraction == "potential" {
         let mut parts = Vec::new();
         for &k in &ks {
-            log.stage("potential-river-kmeans", &format!("k={k}"));
+            log.stage("river-clustering", &format!("start k={k}"));
             let river_clusters = kmeans(&river.equity, 1, &river.weight, k, seed, iterations);
+            log.stage("river-clustering", &format!("end k={k}"));
+            log.stage("write-river-table", &format!("start k={k}"));
             write_table(&out.join(format!("potential-river-k{k}.bin")), 3, k as u32, &river.keys, &river_clusters.assignment);
+            log.stage("write-river-table", &format!("end k={k}"));
+            log.stage("river-ground-matrix", &format!("start k={k}"));
             let mut river_ground = vec![0.0; k * k];
             for left in 0..k {
                 for right in 0..k {
                     river_ground[left * k + right] = (river_clusters.centroids[left] - river_clusters.centroids[right]).abs();
                 }
             }
-            let turn = PotentialFeatures::build(&deck, 4, &river, &river.keys, &river_clusters.assignment, k);
-            let turn_clusters = kmeans_emd(&turn.distribution, k, &turn.weight, &river_ground, k, seed, iterations);
+            log.stage("river-ground-matrix", &format!("end k={k}"));
+            log.stage("turn-features", &format!("start k={k}"));
+            let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, k);
+            log.stage("turn-features", &format!("end k={k}, classes={}", turn.keys.len()));
+            log.stage("turn-clustering", &format!("start k={k}"));
+            let turn_clusters = kmeans_wasserstein_1d(&turn.distribution, &turn.weight, &river_clusters.centroids, k, seed, iterations);
+            for (iteration, diagnostic) in turn_clusters.diagnostics.iter().enumerate() {
+                log.stage("turn-clustering", &format!("k={k}, iteration={}, objective_before={:.9}, objective_after={:.9}, moved_weight_fraction={:.9}, occupied_buckets={}", iteration + 1, diagnostic.objective_before_update, diagnostic.objective_after_update, diagnostic.moved_weight_fraction, diagnostic.occupied_buckets));
+            }
+            log.stage("turn-clustering", &format!("end k={k}"));
+            log.stage("write-turn-table", &format!("start k={k}"));
             write_table(&out.join(format!("potential-turn-k{k}.bin")), 2, k as u32, &turn.keys, &turn_clusters.assignment);
+            log.stage("write-turn-table", &format!("end k={k}"));
+            log.stage("turn-ground-matrix", &format!("start k={k}"));
             let turn_ground = centroid_emd_matrix(&turn_clusters.centroids, k, &river_ground);
-            let flop = PotentialFeatures::build(&deck, 3, &river, &turn.keys, &turn_clusters.assignment, k);
+            log.stage("turn-ground-matrix", &format!("end k={k}"));
+            log.stage("flop-features", &format!("start k={k}"));
+            let flop = PotentialFeatures::build(&deck, 3, &turn.keys, &turn_clusters.assignment, k);
+            log.stage("flop-features", &format!("end k={k}, classes={}", flop.keys.len()));
+            log.stage("flop-clustering", &format!("start k={k}"));
             let flop_clusters = kmeans_emd(&flop.distribution, k, &flop.weight, &turn_ground, k, seed, iterations);
+            for (iteration, diagnostic) in flop_clusters.diagnostics.iter().enumerate() {
+                log.stage("flop-clustering", &format!("k={k}, iteration={}, objective_before={:.9}, objective_after={:.9}, moved_weight_fraction={:.9}, occupied_buckets={}", iteration + 1, diagnostic.objective_before_update, diagnostic.objective_after_update, diagnostic.moved_weight_fraction, diagnostic.occupied_buckets));
+            }
+            log.stage("flop-clustering", &format!("end k={k}"));
+            log.stage("write-flop-table", &format!("start k={k}"));
             write_table(&out.join(format!("potential-flop-k{k}.bin")), 1, k as u32, &flop.keys, &flop_clusters.assignment);
+            log.stage("write-flop-table", &format!("end k={k}"));
             parts.push(format!("{{\"k\": {k}, \"river_classes\": {}, \"turn_classes\": {}, \"flop_classes\": {}, \"river_objective\": {:?}, \"turn_objective\": {:?}, \"flop_objective\": {:?}}}", river.keys.len(), turn.keys.len(), flop.keys.len(), river_clusters.objective, turn_clusters.objective, flop_clusters.objective));
         }
         summary.push(format!("\"tables\": [{}]", parts.join(", ")));
         summary.push(format!("\"elapsed_seconds\": {:.1}", log.started.elapsed().as_secs_f64()));
-        let mut file = fs::File::create(out.join("summary.json")).unwrap();
-        writeln!(file, "{{{}}}", summary.join(", ")).unwrap();
+        atomic_write(&out.join("summary.json"), format!("{{{}}}\n", summary.join(", ")).as_bytes()).expect("summary");
         log.stage("complete", "potential-aware tables written");
         return;
     }
@@ -124,8 +170,7 @@ fn build(args: &[String]) {
     }
     summary.push(format!("\"tables\": [{}]", parts.join(", ")));
     summary.push(format!("\"elapsed_seconds\": {:.1}", log.started.elapsed().as_secs_f64()));
-    let mut file = fs::File::create(out.join("summary.json")).unwrap();
-    writeln!(file, "{{{}}}", summary.join(", ")).unwrap();
+    atomic_write(&out.join("summary.json"), format!("{{{}}}\n", summary.join(", ")).as_bytes()).expect("summary");
     log.stage("complete", "all tables written");
 }
 
@@ -150,5 +195,21 @@ fn main() {
             eprintln!("usage: hu20-buckets build --out DIR [--ranks 13] [--ks 50,200] [--bins 50] | key HOLE BOARD");
             std::process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atomic_write_replaces_status_without_partial_content() {
+        let directory = std::env::temp_dir().join(format!("hu20-buckets-status-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("status.json");
+        atomic_write(&path, b"{\"stage\":\"first\"}\n").unwrap();
+        atomic_write(&path, b"{\"stage\":\"second\"}\n").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{\"stage\":\"second\"}\n");
+        fs::remove_dir_all(directory).unwrap();
     }
 }

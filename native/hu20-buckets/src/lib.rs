@@ -6,6 +6,9 @@
 //! signatures, so every class is computed once and weighted by its orbit size.
 
 use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 pub const RANKS: &[u8] = b"23456789TJQKA";
 pub const SUITS: &[u8] = b"cdhs";
@@ -435,7 +438,6 @@ impl StreetFeatures {
 pub struct PotentialFeatures {
     pub keys: Vec<u128>,
     pub weight: Vec<u64>,
-    pub mean_equity: Vec<f32>,
     /// Построчные нормированные распределения; в строке `dimension` масс.
     pub distribution: Vec<f32>,
     pub dimension: usize,
@@ -445,7 +447,6 @@ impl PotentialFeatures {
     pub fn build(
         deck: &[u8],
         board_size: usize,
-        river: &RiverTable,
         next_keys: &[u128],
         next_assignment: &[u16],
         dimension: usize,
@@ -471,26 +472,27 @@ impl PotentialFeatures {
             .collect();
         reps.par_sort_unstable_by(|left, right| left.0.cmp(&right.0));
         reps.dedup_by(|left, right| left.0 == right.0);
-        let rows: Vec<(u64, f32, Vec<f32>)> = reps
+        let processed = Arc::new(AtomicUsize::new(0));
+        let last_report = Arc::new(Mutex::new(Instant::now()));
+        let progress_started = Instant::now();
+        let total = reps.len();
+        let rows: Vec<(u64, Vec<f32>)> = reps
             .par_iter()
             .map(|(_, hole, board)| {
                 let rest: Vec<u8> = deck.iter().copied().filter(|card| !board.contains(card) && !hole.contains(card)).collect();
                 let mut distribution = vec![0.0; dimension];
-                let mut equity_sum = 0.0f64;
-                if board_size == 4 {
+                let row = if board_size == 4 {
                     for river_card in &rest {
                         let mut river_board = board.clone();
                         river_board.push(*river_card);
                         let key = class_key(hole, &river_board);
                         let index = next_keys.binary_search(&key).expect("river class missing");
                         distribution[next_assignment[index] as usize] += 1.0;
-                        equity_sum += river.equity_of(hole, &river_board) as f64;
                     }
                     let total = rest.len() as f32;
                     for value in &mut distribution { *value /= total; }
-                    (orbit_size(hole, board), (equity_sum / total as f64) as f32, distribution)
+                    (orbit_size(hole, board), distribution)
                 } else {
-                    let mut total = 0u32;
                     for turn_index in 0..rest.len() {
                         let turn_card = rest[turn_index];
                         let mut turn_board = board.clone();
@@ -498,24 +500,23 @@ impl PotentialFeatures {
                         let key = class_key(hole, &turn_board);
                         let index = next_keys.binary_search(&key).expect("turn class missing");
                         distribution[next_assignment[index] as usize] += 1.0;
-                        for (river_index, river_card) in rest.iter().enumerate() {
-                            if river_index == turn_index { continue; }
-                            let mut river_board = turn_board.clone();
-                            river_board.push(*river_card);
-                            equity_sum += river.equity_of(hole, &river_board) as f64;
-                            total += 1;
-                        }
                     }
                     for value in &mut distribution { *value /= rest.len() as f32; }
-                    (orbit_size(hole, board), (equity_sum / total as f64) as f32, distribution)
+                    (orbit_size(hole, board), distribution)
+                };
+                let completed = processed.fetch_add(1, Ordering::Relaxed) + 1;
+                let mut last = last_report.lock().expect("progress log");
+                if completed == total || last.elapsed() >= Duration::from_secs(3) {
+                    eprintln!("potential-features board_size={board_size}: {completed}/{total}, elapsed_seconds={:.1}", progress_started.elapsed().as_secs_f64());
+                    *last = Instant::now();
                 }
+                row
             })
             .collect();
         PotentialFeatures {
             keys: reps.iter().map(|row| row.0).collect(),
             weight: rows.iter().map(|row| row.0).collect(),
-            mean_equity: rows.iter().map(|row| row.1).collect(),
-            distribution: rows.into_iter().flat_map(|row| row.2).collect(),
+            distribution: rows.into_iter().flat_map(|row| row.1).collect(),
             dimension,
         }
     }
@@ -618,10 +619,46 @@ pub fn emd(left: &[f32], right: &[f32], ground: &[f32], dimension: usize) -> f32
     total_cost as f32
 }
 
+/// Точная Wasserstein-1 для распределений на одномерных equity-координатах.
+///
+/// Массы нормируются так же, как в [`emd`]. Порядок компонент входа может не
+/// совпадать с порядком координат; равные координаты не добавляют стоимость.
+pub fn wasserstein_1d(left: &[f32], right: &[f32], coordinates: &[f32]) -> f32 {
+    assert!(left.len() == right.len() && left.len() == coordinates.len());
+    assert!(coordinates.iter().all(|coordinate| coordinate.is_finite()));
+    let left_mass: f64 = left.iter().map(|&value| value as f64).sum();
+    let right_mass: f64 = right.iter().map(|&value| value as f64).sum();
+    assert!(left_mass > 0.0 && right_mass > 0.0, "Wasserstein-1 requires positive mass");
+
+    let mut order: Vec<usize> = (0..coordinates.len()).collect();
+    order.sort_unstable_by(|&left_index, &right_index| {
+        coordinates[left_index].partial_cmp(&coordinates[right_index]).unwrap()
+    });
+
+    let mut imbalance = 0.0f64;
+    let mut cost = 0.0f64;
+    for pair in order.windows(2) {
+        let index = pair[0];
+        imbalance += left[index] as f64 / left_mass - right[index] as f64 / right_mass;
+        let interval = (coordinates[pair[1]] - coordinates[index]) as f64;
+        cost += imbalance.abs() * interval;
+    }
+    cost as f32
+}
+
 pub struct Clustering {
     pub assignment: Vec<u16>,
     pub centroids: Vec<f32>,
     pub objective: Vec<f64>,
+    pub diagnostics: Vec<ClusteringIteration>,
+}
+
+/// Состояние одной итерации EMD-кластеризации.
+pub struct ClusteringIteration {
+    pub objective_before_update: f64,
+    pub objective_after_update: f64,
+    pub moved_weight_fraction: f64,
+    pub occupied_buckets: usize,
 }
 
 /// Weighted k-means under L1 between rows (earth mover's distance for CDFs),
@@ -718,7 +755,7 @@ pub fn kmeans(points: &[f32], dim: usize, weight: &[u64], k: usize, seed: u64, m
             break;
         }
     }
-    Clustering { assignment, centroids, objective }
+    Clustering { assignment, centroids, objective, diagnostics: Vec::new() }
 }
 
 /// Взвешенный k-means для распределений с EMD и заданной ground matrix.
@@ -735,6 +772,7 @@ pub fn kmeans_emd(points: &[f32], dim: usize, weight: &[u64], ground: &[f32], k:
     let total: f64 = weight.iter().map(|&value| value as f64).sum();
     let mut assignment = vec![u16::MAX; n];
     let mut objective = Vec::new();
+    let mut diagnostics = Vec::new();
     for _ in 0..max_iterations {
         let assigned: Vec<(u16, f32)> = (0..n).into_par_iter().map(|index| {
             let point = row(index);
@@ -743,7 +781,8 @@ pub fn kmeans_emd(points: &[f32], dim: usize, weight: &[u64], ground: &[f32], k:
         }).collect();
         let moved: f64 = assigned.iter().zip(&assignment).zip(weight)
             .filter(|((next, old), _)| next.0 != **old).map(|(_, &value)| value as f64).sum();
-        objective.push(assigned.iter().zip(weight).map(|(entry, &value)| entry.1 as f64 * value as f64).sum::<f64>() / total);
+        let objective_before_update = assigned.iter().zip(weight).map(|(entry, &value)| entry.1 as f64 * value as f64).sum::<f64>() / total;
+        objective.push(objective_before_update);
         for (slot, entry) in assignment.iter_mut().zip(&assigned) { *slot = entry.0; }
         let mut sums = vec![0.0f64; k * dim];
         let mut mass = vec![0.0f64; k];
@@ -758,9 +797,100 @@ pub fn kmeans_emd(points: &[f32], dim: usize, weight: &[u64], ground: &[f32], k:
                 for offset in 0..dim { centroids[cluster * dim + offset] = (sums[cluster * dim + offset] / mass[cluster]) as f32; }
             }
         }
+        let objective_after_update = (0..n)
+            .map(|index| {
+                let cluster = assignment[index] as usize;
+                emd(row(index), &centroids[cluster * dim..(cluster + 1) * dim], ground, dim) as f64 * weight[index] as f64
+            })
+            .sum::<f64>() / total;
+        diagnostics.push(ClusteringIteration {
+            objective_before_update,
+            objective_after_update,
+            moved_weight_fraction: moved / total,
+            occupied_buckets: mass.iter().filter(|&&value| value > 0.0).count(),
+        });
         if moved / total < 1e-4 { break; }
     }
-    Clustering { assignment, centroids, objective }
+    Clustering { assignment, centroids, objective, diagnostics }
+}
+
+/// EMD-кластеризация для river ground вида `|equity_i - equity_j|`.
+/// Координаты сортируются ровно один раз, а центроиды перед возвратом
+/// восстанавливаются в исходном порядке компонент.
+pub fn kmeans_wasserstein_1d(points: &[f32], weight: &[u64], coordinates: &[f32], k: usize, seed: u64, max_iterations: usize) -> Clustering {
+    let dimension = coordinates.len();
+    let n = weight.len();
+    assert!(points.len() == n * dimension && k <= n && k <= u16::MAX as usize);
+    let mut order: Vec<usize> = (0..dimension).collect();
+    order.sort_unstable_by(|&left, &right| coordinates[left].partial_cmp(&coordinates[right]).unwrap());
+    let sorted_coordinates: Vec<f32> = order.iter().map(|&index| coordinates[index]).collect();
+    let mut sorted_points = vec![0.0; points.len()];
+    for point in 0..n {
+        for (sorted_index, &original_index) in order.iter().enumerate() {
+            sorted_points[point * dimension + sorted_index] = points[point * dimension + original_index];
+        }
+    }
+    let row = |index: usize| &sorted_points[index * dimension..(index + 1) * dimension];
+    let mut rng = Rng(seed);
+    let mut centroids = Vec::with_capacity(k * dimension);
+    for _ in 0..k {
+        centroids.extend_from_slice(row((rng.next() % n as u64) as usize));
+    }
+    let total: f64 = weight.iter().map(|&value| value as f64).sum();
+    let mut assignment = vec![u16::MAX; n];
+    let mut objective = Vec::new();
+    let mut diagnostics = Vec::new();
+    for _ in 0..max_iterations {
+        let assigned: Vec<(u16, f32)> = (0..n).into_par_iter().map(|index| {
+            let point = row(index);
+            (0..k).map(|cluster| {
+                (cluster as u16, wasserstein_1d_sorted(point, &centroids[cluster * dimension..(cluster + 1) * dimension], &sorted_coordinates))
+            }).min_by(|left, right| left.1.partial_cmp(&right.1).unwrap()).unwrap()
+        }).collect();
+        let moved: f64 = assigned.iter().zip(&assignment).zip(weight)
+            .filter(|((next, old), _)| next.0 != **old).map(|(_, &value)| value as f64).sum();
+        let objective_before_update = assigned.iter().zip(weight).map(|(entry, &value)| entry.1 as f64 * value as f64).sum::<f64>() / total;
+        objective.push(objective_before_update);
+        for (slot, entry) in assignment.iter_mut().zip(&assigned) { *slot = entry.0; }
+        let mut sums = vec![0.0f64; k * dimension];
+        let mut mass = vec![0.0f64; k];
+        for index in 0..n {
+            let cluster = assignment[index] as usize;
+            let row_weight = weight[index] as f64;
+            mass[cluster] += row_weight;
+            for (sum, &value) in sums[cluster * dimension..(cluster + 1) * dimension].iter_mut().zip(row(index)) { *sum += row_weight * value as f64; }
+        }
+        for cluster in 0..k {
+            if mass[cluster] > 0.0 {
+                for offset in 0..dimension { centroids[cluster * dimension + offset] = (sums[cluster * dimension + offset] / mass[cluster]) as f32; }
+            }
+        }
+        let objective_after_update = (0..n).map(|index| {
+            let cluster = assignment[index] as usize;
+            wasserstein_1d_sorted(row(index), &centroids[cluster * dimension..(cluster + 1) * dimension], &sorted_coordinates) as f64 * weight[index] as f64
+        }).sum::<f64>() / total;
+        diagnostics.push(ClusteringIteration { objective_before_update, objective_after_update, moved_weight_fraction: moved / total, occupied_buckets: mass.iter().filter(|&&value| value > 0.0).count() });
+        if moved / total < 1e-4 { break; }
+    }
+    let mut original_centroids = vec![0.0; k * dimension];
+    for cluster in 0..k {
+        for (sorted_index, &original_index) in order.iter().enumerate() {
+            original_centroids[cluster * dimension + original_index] = centroids[cluster * dimension + sorted_index];
+        }
+    }
+    Clustering { assignment, centroids: original_centroids, objective, diagnostics }
+}
+
+fn wasserstein_1d_sorted(left: &[f32], right: &[f32], coordinates: &[f32]) -> f32 {
+    let left_mass: f64 = left.iter().map(|&value| value as f64).sum();
+    let right_mass: f64 = right.iter().map(|&value| value as f64).sum();
+    let mut imbalance = 0.0f64;
+    let mut cost = 0.0f64;
+    for index in 0..coordinates.len().saturating_sub(1) {
+        imbalance += left[index] as f64 / left_mass - right[index] as f64 / right_mass;
+        cost += imbalance.abs() * (coordinates[index + 1] - coordinates[index]) as f64;
+    }
+    cost as f32
 }
 
 /// Матрица ground distances между центроидами улицы для предыдущей улицы.
@@ -933,12 +1063,67 @@ mod tests {
         assert!((emd(&[0.5, 0.5], &[0.0, 1.0], &ground, 2) - 1.0).abs() < 1e-6);
     }
 
+    fn equity_ground(coordinates: &[f32]) -> Vec<f32> {
+        coordinates
+            .iter()
+            .flat_map(|&left| coordinates.iter().map(move |&right| (left - right).abs()))
+            .collect()
+    }
+
+    #[test]
+    fn wasserstein_1d_is_zero_for_identical_distributions() {
+        let coordinates = [0.1, 0.5, 0.9];
+        assert_eq!(wasserstein_1d(&[0.2, 0.3, 0.5], &[0.2, 0.3, 0.5], &coordinates), 0.0);
+    }
+
+    #[test]
+    fn wasserstein_1d_charges_equity_difference_for_unit_mass() {
+        let coordinates = [0.8, 0.2, 0.5];
+        assert!((wasserstein_1d(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0], &coordinates) - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn wasserstein_1d_is_symmetric_and_ignores_zero_components() {
+        let coordinates = [0.7, 0.0, 0.4, 1.0];
+        let left = [0.0, 0.25, 0.75, 0.0];
+        let right = [0.5, 0.0, 0.0, 0.5];
+        let forward = wasserstein_1d(&left, &right, &coordinates);
+        let backward = wasserstein_1d(&right, &left, &coordinates);
+        assert!((forward - backward).abs() < 1e-6);
+        assert!(forward.is_finite());
+    }
+
+    #[test]
+    fn wasserstein_1d_handles_uneven_intervals_and_equal_coordinates() {
+        let coordinates = [0.7, 0.0, 0.0, 1.0];
+        let left = [0.2, 0.3, 0.1, 0.4];
+        let right = [0.1, 0.0, 0.4, 0.5];
+        let expected = emd(&left, &right, &equity_ground(&coordinates), coordinates.len());
+        let actual = wasserstein_1d(&left, &right, &coordinates);
+        assert!((actual - expected).abs() < 5e-6, "actual={actual}, expected={expected}");
+    }
+
+    #[test]
+    fn wasserstein_1d_matches_general_emd_for_normalized_distributions() {
+        let coordinates = [0.91, 0.12, 0.55, 0.31, 0.77];
+        let cases = [
+            ([0.05, 0.15, 0.2, 0.25, 0.35], [0.4, 0.1, 0.2, 0.1, 0.2]),
+            ([0.2, 0.2, 0.2, 0.2, 0.2], [0.0, 0.3, 0.1, 0.4, 0.2]),
+        ];
+        let ground = equity_ground(&coordinates);
+        for (left, right) in cases {
+            let expected = emd(&left, &right, &ground, coordinates.len());
+            let actual = wasserstein_1d(&left, &right, &coordinates);
+            assert!((actual - expected).abs() < 5e-6, "actual={actual}, expected={expected}");
+        }
+    }
+
     #[test]
     fn potential_turn_features_are_normalized_river_bucket_distributions() {
         let deck = deck(5);
         let river = RiverTable::build(&deck);
         let river_assignment: Vec<u16> = (0..river.keys.len()).map(|i| (i % 3) as u16).collect();
-        let turn = PotentialFeatures::build(&deck, 4, &river, &river.keys, &river_assignment, 3);
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_assignment, 3);
         assert_eq!(turn.dimension, 3);
         assert_eq!(turn.distribution.len(), turn.keys.len() * 3);
         for row in turn.distribution.chunks_exact(3) {
@@ -951,9 +1136,9 @@ mod tests {
         let deck = deck(5);
         let river = RiverTable::build(&deck);
         let river_assignment: Vec<u16> = (0..river.keys.len()).map(|i| (i % 3) as u16).collect();
-        let turn = PotentialFeatures::build(&deck, 4, &river, &river.keys, &river_assignment, 3);
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_assignment, 3);
         let turn_assignment: Vec<u16> = (0..turn.keys.len()).map(|i| (i % 4) as u16).collect();
-        let flop = PotentialFeatures::build(&deck, 3, &river, &turn.keys, &turn_assignment, 4);
+        let flop = PotentialFeatures::build(&deck, 3, &turn.keys, &turn_assignment, 4);
         assert_eq!(flop.dimension, 4);
         for row in flop.distribution.chunks_exact(4) {
             assert!((row.iter().sum::<f32>() - 1.0).abs() < 1e-6, "{row:?}");
@@ -975,5 +1160,35 @@ mod tests {
         let ground = vec![0.0, 1.0, 1.0, 0.0];
         let distance = emd(&[0.5, 0.5], &[0.499_999_97, 0.5], &ground, 2);
         assert!(distance.is_finite());
+    }
+
+    #[test]
+    fn kmeans_emd_records_finite_iteration_diagnostics() {
+        let points = vec![1.0, 0.0, 0.8, 0.2, 0.0, 1.0, 0.1, 0.9];
+        let weight = vec![2, 1, 3, 4];
+        let ground = vec![0.0, 1.0, 1.0, 0.0];
+        let result = kmeans_emd(&points, 2, &weight, &ground, 2, 7, 5);
+
+        assert!(!result.diagnostics.is_empty());
+        for iteration in result.diagnostics {
+            assert!(iteration.objective_before_update.is_finite());
+            assert!(iteration.objective_after_update.is_finite());
+            assert!((0.0..=1.0).contains(&iteration.moved_weight_fraction));
+            assert!((1..=2).contains(&iteration.occupied_buckets));
+        }
+    }
+
+    #[test]
+    fn kmeans_wasserstein_1d_matches_general_emd_clustering() {
+        let coordinates = vec![0.9, 0.1, 0.5];
+        let points = vec![0.7, 0.1, 0.2, 0.1, 0.8, 0.1, 0.2, 0.2, 0.6, 0.0, 0.2, 0.8];
+        let weights = vec![1, 2, 3, 4];
+        let general = kmeans_emd(&points, 3, &weights, &equity_ground(&coordinates), 2, 23, 4);
+        let fast = kmeans_wasserstein_1d(&points, &weights, &coordinates, 2, 23, 4);
+        assert_eq!(fast.assignment, general.assignment);
+        assert_eq!(fast.centroids.len(), general.centroids.len());
+        for (actual, expected) in fast.objective.iter().zip(&general.objective) {
+            assert!((actual - expected).abs() < 5e-6, "actual={actual}, expected={expected}");
+        }
     }
 }
