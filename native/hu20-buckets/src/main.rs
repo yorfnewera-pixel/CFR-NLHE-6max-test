@@ -62,7 +62,7 @@ fn abort_emd(out: &Path, stage: &str, error: EmdContextError) -> ! {
 
 fn code_revision() -> String {
     std::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+        .args(["rev-parse", "HEAD"])
         .output()
         .ok()
         .filter(|output| output.status.success())
@@ -70,6 +70,15 @@ fn code_revision() -> String {
         .map(|revision| revision.trim().to_owned())
         .filter(|revision| !revision.is_empty())
         .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn working_tree_is_dirty() -> bool {
+    std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| !output.stdout.is_empty())
 }
 
 fn bucket_summary(k: usize, assignment: &[u16], weight: &[u64], equity: &[f32]) -> String {
@@ -114,8 +123,8 @@ fn build(args: &[String]) {
     };
     let deck = deck(ranks);
     let mut summary = vec![format!(
-        "\"format\": \"{}\", \"ranks\": {ranks}, \"deck_cards\": {}, \"bins\": {bins}, \"seed\": {seed}, \"ks\": {ks:?}, \"threads\": {}, \"code_revision\": \"{}\"",
-        if abstraction == "potential" { "hu20-potential-aware-emd-v1" } else { "hu20-equity-buckets-v1" }, deck.len(), rayon::current_num_threads(), code_revision())];
+        "\"format\": \"{}\", \"ranks\": {ranks}, \"deck_cards\": {}, \"bins\": {bins}, \"seed\": {seed}, \"ks\": {ks:?}, \"threads\": {}, \"code_revision\": \"{}\", \"working_tree_dirty\": {}",
+        if abstraction == "potential" { "hu20-potential-aware-emd-v1" } else { "hu20-equity-buckets-v1" }, deck.len(), rayon::current_num_threads(), code_revision(), working_tree_is_dirty())];
 
     log.stage("river-equity", "computing");
     let river = RiverTable::build(&deck);
@@ -341,5 +350,11 @@ mod tests {
         atomic_write(&path, b"{\"stage\":\"second\"}\n").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"{\"stage\":\"second\"}\n");
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn code_revision_is_full_git_sha() {
+        let revision = code_revision();
+        assert!(revision == "unknown" || revision.len() == 40, "{revision}");
     }
 }

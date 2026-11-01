@@ -25,6 +25,9 @@ if (-not (Test-Path -LiteralPath $output -PathType Container)) {
 
 Push-Location $project
 try {
+    if (git status --porcelain) {
+        throw 'Refusing to measure a dirty working tree. Commit or stash changes first.'
+    }
     cargo build --release
     $binary = Join-Path $project 'target\release\hu20-buckets.exe'
     if (-not (Test-Path -LiteralPath $binary)) { throw "Release binary was not found: $binary" }
@@ -47,7 +50,7 @@ try {
             -RedirectStandardError (Join-Path $output 'stderr.log')
         $memoryJob = Start-Job -ScriptBlock $ExecutionContext.InvokeCommand.NewScriptBlock("& '$PSScriptRoot\measure-process-memory.ps1' -Process (Get-Process -Id $($process.Id)) -Path '$output\memory.csv'")
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            Stop-Process -Id $process.Id -Force
+            & taskkill.exe /pid $process.Id /t /f | Out-Null
             throw "Timed out after $TimeoutSeconds seconds; process was stopped."
         }
         Receive-Job -Job $memoryJob -Wait -AutoRemoveJob | Out-Null
@@ -72,14 +75,20 @@ try {
             if ($memoryJob.State -eq 'Running') { Stop-Job -Job $memoryJob }
             Remove-Job -Job $memoryJob -Force -ErrorAction SilentlyContinue
         }
-        if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+        if ($process -and -not $process.HasExited) { & taskkill.exe /pid $process.Id /t /f | Out-Null }
         $env:RAYON_NUM_THREADS = $previousThreads
     }
 
-    Get-ChildItem -LiteralPath $output -File -Filter '*.bin' |
+    $tables = Get-ChildItem -LiteralPath $output -File -Filter '*.bin'
+    if ($tables.Count -ne 3) { throw "Expected exactly three tables, found $($tables.Count)." }
+    $tables |
         Get-FileHash -Algorithm SHA256 |
         Select-Object Path, Algorithm, Hash |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'table-hashes.json') -Encoding utf8
+    $finalStatus = Get-Content -Raw -LiteralPath (Join-Path $output 'status.json') | ConvertFrom-Json
+    if ($finalStatus.stage -ne 'complete' -or -not (Test-Path -LiteralPath (Join-Path $output 'summary.json') -PathType Leaf)) {
+        throw 'Generator did not produce a complete summary and status.'
+    }
 } finally {
     Pop-Location
 }

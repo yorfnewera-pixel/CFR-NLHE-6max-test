@@ -873,6 +873,9 @@ pub struct Clustering {
 pub struct ClusteringIteration {
     pub objective_before_update: f64,
     pub objective_after_update: f64,
+    /// Цель после нового assignment к центрам предыдущего update.
+    /// Для последней итерации отсутствует, пока отдельная проверка не запрошена.
+    pub objective_after_reassignment: Option<f64>,
     pub moved_weight_fraction: f64,
     pub occupied_buckets: usize,
 }
@@ -1058,7 +1061,7 @@ pub fn kmeans_emd_with_progress(
     let total: f64 = weight.iter().map(|&value| value as f64).sum();
     let mut assignment = vec![u16::MAX; n];
     let mut objective = Vec::new();
-    let mut diagnostics = Vec::new();
+    let mut diagnostics: Vec<ClusteringIteration> = Vec::new();
     for iteration in 1..=max_iterations {
         if let Some(callback) = &progress {
             callback(EmdProgressEvent::IterationStart { iteration });
@@ -1109,6 +1112,9 @@ pub fn kmeans_emd_with_progress(
             .map(|(entry, &value)| entry.1 as f64 * value as f64)
             .sum::<f64>()
             / total;
+        if let Some(previous) = diagnostics.last_mut() {
+            previous.objective_after_reassignment = Some(objective_before_update);
+        }
         objective.push(objective_before_update);
         for (slot, entry) in assignment.iter_mut().zip(&assigned) {
             *slot = entry.0;
@@ -1155,6 +1161,7 @@ pub fn kmeans_emd_with_progress(
         let diagnostic = ClusteringIteration {
             objective_before_update,
             objective_after_update,
+            objective_after_reassignment: None,
             moved_weight_fraction: moved / total,
             occupied_buckets: mass.iter().filter(|&&value| value > 0.0).count(),
         };
@@ -1287,6 +1294,7 @@ pub fn kmeans_wasserstein_1d(
         diagnostics.push(ClusteringIteration {
             objective_before_update,
             objective_after_update,
+            objective_after_reassignment: None,
             moved_weight_fraction: moved / total,
             occupied_buckets: mass.iter().filter(|&&value| value > 0.0).count(),
         });
@@ -1765,6 +1773,44 @@ mod tests {
             assert!((0.0..=1.0).contains(&iteration.moved_weight_fraction));
             assert!((1..=2).contains(&iteration.occupied_buckets));
         }
+    }
+
+    #[test]
+    fn kmeans_emd_links_reassignment_objective_to_previous_update() {
+        let result = kmeans_emd(
+            &[1.0, 0.0, 0.8, 0.2, 0.0, 1.0, 0.1, 0.9],
+            2,
+            &[2, 1, 3, 4],
+            &[0.0, 1.0, 1.0, 0.0],
+            2,
+            7,
+            2,
+        )
+        .expect("valid EMD clustering");
+        assert_eq!(result.diagnostics.len(), 2);
+        assert_eq!(
+            result.diagnostics[0].objective_after_reassignment,
+            Some(result.diagnostics[1].objective_before_update)
+        );
+        assert_eq!(result.diagnostics[1].objective_after_reassignment, None);
+    }
+
+    #[test]
+    fn arithmetic_mean_can_increase_emd_objective() {
+        let ground = [0.0, 1.0, 1.0, 0.0];
+        let points = [[1.0, 0.0], [0.0, 1.0]];
+        let weights = [3.0, 1.0];
+        let previous_center = points[0];
+        let mean_center = [0.75, 0.25];
+        let objective = |center: &[f32]| {
+            points
+                .iter()
+                .zip(weights)
+                .map(|(point, weight)| emd(point, center, &ground, 2) as f64 * weight)
+                .sum::<f64>()
+                / 4.0
+        };
+        assert!(objective(&mean_center) > objective(&previous_center));
     }
 
     #[test]
