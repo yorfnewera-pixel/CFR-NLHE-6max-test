@@ -42,6 +42,7 @@ function Invoke-SupervisedProcess {
         if (-not $completed) {
             "timeout=true" | Add-Content -LiteralPath $ContextPath -Encoding utf8
             & taskkill.exe /pid $process.Id /t /f | Out-Null
+            "taskkill_exit_code=$LASTEXITCODE" | Add-Content -LiteralPath $ContextPath -Encoding utf8
             throw "Timed out after $TimeoutSeconds seconds; process was stopped."
         }
         [Threading.Tasks.Task]::WaitAll(@($stdoutCopy, $stderrCopy))
@@ -69,9 +70,10 @@ function Invoke-SupervisedProcess {
             Remove-Job -Job $memoryJob -Force -ErrorAction SilentlyContinue
         }
         if ($process -and -not $process.HasExited) { & taskkill.exe /pid $process.Id /t /f | Out-Null }
-        foreach ($copy in @($stdoutCopy, $stderrCopy)) { if ($copy -and -not $copy.IsCompleted) { $copy.Wait(5000) | Out-Null } }
-        if ($stdoutFile) { $stdoutFile.Dispose() }
-        if ($stderrFile) { $stderrFile.Dispose() }
+        try { foreach ($copy in @($stdoutCopy, $stderrCopy)) { if ($copy -and -not $copy.IsCompleted) { $copy.Wait(5000) | Out-Null } } } catch { "copy_cleanup_error=$($_.Exception.ToString())" | Add-Content -LiteralPath $ContextPath -Encoding utf8 } finally {
+            if ($stdoutFile) { $stdoutFile.Dispose() }
+            if ($stderrFile) { $stderrFile.Dispose() }
+        }
         if ($process) { $process.Dispose() }
     }
 }

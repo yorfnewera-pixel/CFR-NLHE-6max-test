@@ -28,10 +28,10 @@ try {
     $zeroContext = Invoke-Smoke -Name 'zero' -Arguments '/c ping -n 2 127.0.0.1 > nul & exit 0'
     Assert-Contains -Text (Get-Content -Raw -LiteralPath $zeroContext) -Expected 'exit_code=0' -Message 'Exit code 0 was not recorded.'
 
-    try { $null = Invoke-Smoke -Name 'seven' -Arguments '/c ping -n 2 127.0.0.1 > nul & exit 7'; throw 'Exit 7 was accepted.' } catch { }
+    $failed = $false; try { $null = Invoke-Smoke -Name 'seven' -Arguments '/c ping -n 2 127.0.0.1 > nul & exit 7' } catch { $failed = $true }; if (-not $failed) { throw 'Exit 7 was accepted.' }
     Assert-Contains -Text (Get-Content -Raw -LiteralPath (Join-Path $testRoot 'seven\context.txt')) -Expected 'exit_code=7' -Message 'Exit code 7 was not recorded.'
 
-    try { $null = Invoke-Smoke -Name 'memory-error' -Arguments '/c exit 0' -MemoryScript (Join-Path $testRoot 'missing-memory.ps1'); throw 'Memory error was accepted.' } catch { }
+    $failed = $false; try { $null = Invoke-Smoke -Name 'memory-error' -Arguments '/c exit 0' -MemoryScript (Join-Path $testRoot 'missing-memory.ps1') } catch { $failed = $true }; if (-not $failed) { throw 'Memory error was accepted.' }
     $memoryContext = Get-Content -Raw -LiteralPath (Join-Path $testRoot 'memory-error\context.txt')
     Assert-Contains -Text $memoryContext -Expected 'exit_code=0' -Message 'Exit code was not retained after memory failure.'
     Assert-Contains -Text $memoryContext -Expected 'memory_job_error=' -Message 'Memory failure was not recorded.'
@@ -41,7 +41,7 @@ try {
     Assert-Contains -Text (Get-Content -Raw -LiteralPath (Join-Path $testRoot 'dual-output\stdout.log')) -Expected 'out-2000' -Message 'stdout transfer was incomplete.'
     Assert-Contains -Text (Get-Content -Raw -LiteralPath (Join-Path $testRoot 'dual-output\stderr.log')) -Expected 'err-2000' -Message 'stderr transfer was incomplete.'
 
-    try { $null = Invoke-Smoke -Name 'timeout' -Arguments '/c ping -n 10 127.0.0.1 > nul' -TimeoutSeconds 1; throw 'Timeout was accepted.' } catch { }
+    $failed = $false; try { $null = Invoke-Smoke -Name 'timeout' -Arguments '/c ping -n 10 127.0.0.1 > nul' -TimeoutSeconds 1 } catch { $failed = $true }; if (-not $failed) { throw 'Timeout was accepted.' }
     $timeoutDirectory = Join-Path $testRoot 'timeout'
     Assert-Contains -Text (Get-Content -Raw -LiteralPath (Join-Path $timeoutDirectory 'context.txt')) -Expected 'timeout=true' -Message 'Timeout was not recorded.'
     foreach ($file in @('stdout.log', 'stderr.log')) {
