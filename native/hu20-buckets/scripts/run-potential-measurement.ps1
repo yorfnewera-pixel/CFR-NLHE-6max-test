@@ -11,13 +11,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $PSScriptRoot
-$output = [IO.Path]::GetFullPath($OutputDirectory)
+$output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) {
     if ((Get-ChildItem -LiteralPath $output -Force | Measure-Object).Count -ne 0) {
         throw "Output directory is not empty: $output"
     }
 } else {
     New-Item -ItemType Directory -Path $output | Out-Null
+}
+if (-not (Test-Path -LiteralPath $output -PathType Container)) {
+    throw "Output directory was not created: $output"
 }
 
 Push-Location $project
@@ -32,6 +35,7 @@ try {
     }) -join ' '
     $command = "`"$binary`" $quotedArguments"
     $command | Set-Content -LiteralPath (Join-Path $output 'command.txt') -Encoding utf8
+    "output_directory=$output" | Set-Content -LiteralPath (Join-Path $output 'launcher-context.txt') -Encoding utf8
 
     $previousThreads = $env:RAYON_NUM_THREADS
     $env:RAYON_NUM_THREADS = $Threads.ToString()
@@ -47,7 +51,22 @@ try {
             throw "Timed out after $TimeoutSeconds seconds; process was stopped."
         }
         Receive-Job -Job $memoryJob -Wait -AutoRemoveJob | Out-Null
-        if ($process.ExitCode -ne 0) { throw "Generator exited with code $($process.ExitCode). See stderr.log" }
+        $process.Refresh()
+        $exitCode = $process.ExitCode
+        if ($null -eq $exitCode) {
+            $summaryPath = Join-Path $output 'summary.json'
+            $statusPath = Join-Path $output 'status.json'
+            $completed = (Test-Path -LiteralPath $summaryPath -PathType Leaf) -and
+                (Test-Path -LiteralPath $statusPath -PathType Leaf) -and
+                ((Get-Content -Raw -LiteralPath $statusPath | ConvertFrom-Json).stage -eq 'complete')
+            if ($completed) {
+                $exitCode = 0
+            } else {
+                throw "Generator process exited but its exit code is unavailable. See $output\stderr.log"
+            }
+        }
+        "process_id=$($process.Id)`nexit_code=$exitCode" | Add-Content -LiteralPath (Join-Path $output 'launcher-context.txt') -Encoding utf8
+        if ($exitCode -ne 0) { throw "Generator exited with code $exitCode. See $output\stderr.log" }
     } finally {
         if ($memoryJob) {
             if ($memoryJob.State -eq 'Running') { Stop-Job -Job $memoryJob }
