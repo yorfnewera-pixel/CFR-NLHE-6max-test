@@ -45,7 +45,7 @@ function Invoke-SupervisedProcess {
             "taskkill_exit_code=$LASTEXITCODE" | Add-Content -LiteralPath $ContextPath -Encoding utf8
             $stopped = $process.WaitForExit(5000)
             "taskkill_process_stopped=$stopped" | Add-Content -LiteralPath $ContextPath -Encoding utf8
-            throw "Timed out after $TimeoutSeconds seconds; process was stopped."
+            throw "Timed out after $TimeoutSeconds seconds; stop result was recorded in $ContextPath."
         }
         if (-not [Threading.Tasks.Task]::WaitAll(@($stdoutCopy, $stderrCopy), 5000)) { throw 'Output transfer did not finish within 5 seconds.' }
         $memoryJobError = $null
