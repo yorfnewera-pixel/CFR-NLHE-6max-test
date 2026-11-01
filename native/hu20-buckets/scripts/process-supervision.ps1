@@ -43,12 +43,15 @@ function Invoke-SupervisedProcess {
             "timeout=true" | Add-Content -LiteralPath $ContextPath -Encoding utf8
             & taskkill.exe /pid $process.Id /t /f | Out-Null
             "taskkill_exit_code=$LASTEXITCODE" | Add-Content -LiteralPath $ContextPath -Encoding utf8
+            $stopped = $process.WaitForExit(5000)
+            "taskkill_process_stopped=$stopped" | Add-Content -LiteralPath $ContextPath -Encoding utf8
             throw "Timed out after $TimeoutSeconds seconds; process was stopped."
         }
-        [Threading.Tasks.Task]::WaitAll(@($stdoutCopy, $stderrCopy))
+        if (-not [Threading.Tasks.Task]::WaitAll(@($stdoutCopy, $stderrCopy), 5000)) { throw 'Output transfer did not finish within 5 seconds.' }
         $memoryJobError = $null
         if ($memoryJob) { try {
             $memoryJobState = $memoryJob.State
+            if (-not (Wait-Job -Job $memoryJob -Timeout 5)) { throw 'Memory monitor did not finish within 5 seconds.' }
             Receive-Job -Job $memoryJob -Wait -AutoRemoveJob -ErrorAction Stop | Out-Null
             "memory_job_state=$memoryJobState" | Add-Content -LiteralPath $ContextPath -Encoding utf8
         } catch {
@@ -70,7 +73,7 @@ function Invoke-SupervisedProcess {
             Remove-Job -Job $memoryJob -Force -ErrorAction SilentlyContinue
         }
         if ($process -and -not $process.HasExited) { & taskkill.exe /pid $process.Id /t /f | Out-Null }
-        try { foreach ($copy in @($stdoutCopy, $stderrCopy)) { if ($copy -and -not $copy.IsCompleted) { $copy.Wait(5000) | Out-Null } } } catch { "copy_cleanup_error=$($_.Exception.ToString())" | Add-Content -LiteralPath $ContextPath -Encoding utf8 } finally {
+        try { foreach ($copy in @($stdoutCopy, $stderrCopy)) { if ($copy -and -not $copy.IsCompleted -and -not $copy.Wait(5000)) { throw 'Output transfer cleanup timed out.' } } } catch { "copy_cleanup_error=$($_.Exception.ToString())" | Add-Content -LiteralPath $ContextPath -Encoding utf8 } finally {
             if ($stdoutFile) { $stdoutFile.Dispose() }
             if ($stderrFile) { $stderrFile.Dispose() }
         }
