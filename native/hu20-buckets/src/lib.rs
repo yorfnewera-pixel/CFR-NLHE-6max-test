@@ -1727,6 +1727,291 @@ mod tests {
         text.split_whitespace().map(parse_card).collect()
     }
 
+    fn ranks5_disconnected_transport_fixture() -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let left = vec![
+            0.13333334, 0.0, 0.06666667, 0.0, 0.0, 0.0, 0.4, 0.0, 0.26666668, 0.13333334,
+        ];
+        let right = vec![
+            0.13333334, 0.0, 0.0, 0.0, 0.0, 0.0, 0.46666667, 0.0, 0.26666668, 0.13333334,
+        ];
+        let ground = vec![
+            0.0,
+            0.1547003,
+            0.26344058,
+            0.37948424,
+            0.121828094,
+            0.19579911,
+            0.22736175,
+            0.3203327,
+            0.23452008,
+            0.29428524,
+            0.1547003,
+            0.0,
+            0.13274729,
+            0.24522302,
+            0.2564203,
+            0.33043665,
+            0.24524431,
+            0.23298159,
+            0.20729323,
+            0.42887747,
+            0.26344058,
+            0.13274729,
+            0.0,
+            0.11604366,
+            0.38526866,
+            0.4591352,
+            0.16985136,
+            0.1178549,
+            0.12155493,
+            0.5577258,
+            0.37948424,
+            0.24522302,
+            0.11604366,
+            0.0,
+            0.5013123,
+            0.57517886,
+            0.21012262,
+            0.120126605,
+            0.15476401,
+            0.6737695,
+            0.121828094,
+            0.2564203,
+            0.38526866,
+            0.5013123,
+            0.0,
+            0.074084334,
+            0.30677053,
+            0.4421608,
+            0.3563482,
+            0.17245714,
+            0.19579911,
+            0.33043665,
+            0.4591352,
+            0.57517886,
+            0.074084334,
+            0.0,
+            0.38063708,
+            0.51602733,
+            0.43021473,
+            0.09859059,
+            0.22736175,
+            0.24524431,
+            0.16985136,
+            0.21012262,
+            0.30677053,
+            0.38063708,
+            0.0,
+            0.13539027,
+            0.0666598,
+            0.47922766,
+            0.3203327,
+            0.23298159,
+            0.1178549,
+            0.120126605,
+            0.4421608,
+            0.51602733,
+            0.13539027,
+            0.0,
+            0.08581262,
+            0.61461794,
+            0.23452008,
+            0.20729323,
+            0.12155493,
+            0.15476401,
+            0.3563482,
+            0.43021473,
+            0.0666598,
+            0.08581262,
+            0.0,
+            0.5288053,
+            0.29428524,
+            0.42887747,
+            0.5577258,
+            0.6737695,
+            0.17245714,
+            0.09859059,
+            0.47922766,
+            0.61461794,
+            0.5288053,
+            0.0,
+        ];
+        (left, right, ground)
+    }
+
+    #[derive(Debug)]
+    struct EmdFailureTrace {
+        transport_mass: f64,
+        delivered: f64,
+        augmentations: usize,
+        reachable_supply: Vec<usize>,
+        reachable_demand: Vec<usize>,
+        source_residual: f64,
+        demand_residual: f64,
+        eligible_demand_edges: usize,
+        minimum_reduced_cost: f64,
+    }
+
+    fn trace_disconnected_transport(
+        left: &[f32],
+        right: &[f32],
+        ground: &[f32],
+        dimension: usize,
+    ) -> EmdFailureTrace {
+        let left_mass: f64 = left.iter().map(|&value| value as f64).sum();
+        let right_mass: f64 = right.iter().map(|&value| value as f64).sum();
+        let normalized_left: Vec<f64> =
+            left.iter().map(|&value| value as f64 / left_mass).collect();
+        let normalized_right: Vec<f64> = right
+            .iter()
+            .map(|&value| value as f64 / right_mass)
+            .collect();
+        let transport_mass = normalized_left
+            .iter()
+            .sum::<f64>()
+            .min(normalized_right.iter().sum::<f64>());
+        let source = 2 * dimension;
+        let sink = source + 1;
+        let mut graph = vec![Vec::new(); sink + 1];
+        for index in 0..dimension {
+            add_flow_edge(&mut graph, source, index, normalized_left[index], 0.0);
+            add_flow_edge(
+                &mut graph,
+                dimension + index,
+                sink,
+                normalized_right[index],
+                0.0,
+            );
+            for target in 0..dimension {
+                add_flow_edge(
+                    &mut graph,
+                    index,
+                    dimension + target,
+                    1.0,
+                    ground[index * dimension + target] as f64,
+                );
+            }
+        }
+        let mut potential = vec![0.0; graph.len()];
+        let mut delivered = 0.0;
+        let mut augmentations = 0usize;
+        loop {
+            let mut distance = vec![f64::INFINITY; graph.len()];
+            let mut previous = vec![None; graph.len()];
+            let mut used = vec![false; graph.len()];
+            distance[source] = 0.0;
+            for _ in 0..graph.len() {
+                let next = (0..graph.len())
+                    .filter(|&vertex| !used[vertex])
+                    .min_by(|&left, &right| distance[left].partial_cmp(&distance[right]).unwrap())
+                    .unwrap();
+                if !distance[next].is_finite() {
+                    break;
+                }
+                used[next] = true;
+                if next == sink {
+                    continue;
+                }
+                for (edge_index, edge) in graph[next].iter().enumerate() {
+                    if edge.capacity <= 1e-9 || used[edge.to] {
+                        continue;
+                    }
+                    let candidate =
+                        distance[next] + edge.cost + potential[next] - potential[edge.to];
+                    if candidate < distance[edge.to] {
+                        distance[edge.to] = candidate;
+                        previous[edge.to] = Some((next, edge_index));
+                    }
+                }
+            }
+            if !used[sink] {
+                let mut minimum_reduced_cost = f64::INFINITY;
+                for (from, edges) in graph.iter().enumerate() {
+                    for edge in edges {
+                        if edge.capacity > 1e-9 {
+                            minimum_reduced_cost = minimum_reduced_cost
+                                .min(edge.cost + potential[from] - potential[edge.to]);
+                        }
+                    }
+                }
+                let demand_residuals: Vec<f64> = (0..dimension)
+                    .map(|index| {
+                        graph[dimension + index]
+                            .iter()
+                            .find(|edge| edge.to == sink)
+                            .expect("demand node must connect to sink")
+                            .capacity
+                    })
+                    .collect();
+                return EmdFailureTrace {
+                    transport_mass,
+                    delivered,
+                    augmentations,
+                    reachable_supply: (0..dimension).filter(|&index| used[index]).collect(),
+                    reachable_demand: (0..dimension)
+                        .filter(|&index| used[dimension + index])
+                        .collect(),
+                    source_residual: graph[source]
+                        .iter()
+                        .map(|edge| edge.capacity)
+                        .filter(|&capacity| capacity > 1e-9)
+                        .sum(),
+                    demand_residual: (0..dimension).map(|index| demand_residuals[index]).sum(),
+                    eligible_demand_edges: demand_residuals
+                        .iter()
+                        .filter(|&&capacity| capacity > 1e-9)
+                        .count(),
+                    minimum_reduced_cost,
+                };
+            }
+            for vertex in 0..graph.len() {
+                if used[vertex] {
+                    potential[vertex] += distance[vertex];
+                }
+            }
+            let mut amount = transport_mass - delivered;
+            let path = reconstruct_path(&previous, source, sink).expect("reachable sink has path");
+            for &(from, edge) in &path {
+                amount = amount.min(graph[from][edge].capacity);
+            }
+            let mut node = sink;
+            for &(from, edge) in &path {
+                let reverse = graph[from][edge].reverse;
+                graph[from][edge].capacity -= amount;
+                graph[node][reverse].capacity += amount;
+                node = from;
+            }
+            delivered += amount;
+            augmentations += 1;
+        }
+    }
+
+    #[test]
+    fn ranks5_failure_fixture_reproduces_disconnected_transport_graph() {
+        let (left, right, ground) = ranks5_disconnected_transport_fixture();
+
+        let error = try_emd(&left, &right, &ground, 10)
+            .expect_err("captured ranks=5 flop assignment must fail");
+
+        assert!(matches!(error, EmdError::DisconnectedTransportGraph));
+    }
+
+    #[test]
+    fn ranks5_failure_fixture_reports_residual_graph_state() {
+        let (left, right, ground) = ranks5_disconnected_transport_fixture();
+        let trace = trace_disconnected_transport(&left, &right, &ground, 10);
+
+        println!("{trace:#?}");
+        assert!(trace.delivered + 1e-9 < trace.transport_mass);
+        assert_eq!(trace.augmentations, 6);
+        assert_eq!(trace.reachable_supply, vec![0, 2, 6, 8, 9]);
+        assert_eq!(trace.reachable_demand, (0..10).collect::<Vec<_>>());
+        assert!(trace.source_residual > 1e-9);
+        assert!(trace.demand_residual > 1e-9);
+        assert_eq!(trace.eligible_demand_edges, 0);
+        assert!(trace.minimum_reduced_cost.is_sign_negative());
+    }
+
     #[test]
     fn streaming_emd_minimum_matches_reference_for_k1_ties_and_signed_zeroes() {
         let cases = [
