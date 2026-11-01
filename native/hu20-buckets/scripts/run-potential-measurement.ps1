@@ -7,7 +7,8 @@ param(
     [ValidateRange(1, 64)] [int] $Threads = 2,
     [ValidateRange(1, 86400)] [int] $TimeoutSeconds = 3600,
     [UInt64] $Seed = 202610050003,
-    [switch] $DiagnoseFinalAssignments
+    [switch] $DiagnoseFinalAssignments,
+    [switch] $ProfileFlopEmd
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,6 +42,9 @@ try {
     $arguments = @('build', '--out', $output, '--ranks', $Ranks, '--ks', $K, '--iterations', $Iterations, '--seed', $Seed, '--abstraction', 'potential')
     if ($DiagnoseFinalAssignments) {
         $arguments += '--diagnose-final-assignments'
+    }
+    if ($ProfileFlopEmd) {
+        $arguments += '--profile-flop-emd'
     }
     $quotedArguments = ($arguments | ForEach-Object {
         if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }

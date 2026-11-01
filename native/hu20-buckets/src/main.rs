@@ -1,4 +1,4 @@
-//! hu20-buckets build --out DIR [--ranks 13] [--ks 50,200] [--bins 50] [--seed 1] [--iterations 100] [--diagnose-final-assignments]
+//! hu20-buckets build --out DIR [--ranks 13] [--ks 50,200] [--bins 50] [--seed 1] [--iterations 100] [--diagnose-final-assignments] [--profile-flop-emd]
 //! hu20-buckets key HOLE BOARD     e.g. key "Ah Kh" "2h 7c 9d"
 use hu20_buckets::*;
 use std::fs;
@@ -115,6 +115,7 @@ fn build(args: &[String]) {
     let diagnose_final_assignments = args
         .iter()
         .any(|argument| argument == "--diagnose-final-assignments");
+    let profile_flop_emd = args.iter().any(|argument| argument == "--profile-flop-emd");
     assert!(
         matches!(abstraction.as_str(), "equity" | "potential"),
         "--abstraction must be equity or potential"
@@ -134,6 +135,7 @@ fn build(args: &[String]) {
     log.stage("river-equity", &format!("{} classes", river.keys.len()));
     if abstraction == "potential" {
         let mut parts = Vec::new();
+        let mut profiling_parts = Vec::new();
         for &k in &ks {
             log.stage("river-clustering", &format!("start k={k}"));
             let river_clusters = kmeans(&river.equity, 1, &river.weight, k, seed, iterations);
@@ -190,8 +192,22 @@ fn build(args: &[String]) {
             );
             log.stage("write-turn-table", &format!("end k={k}"));
             log.stage("turn-ground-matrix", &format!("start k={k}"));
-            let turn_ground = centroid_emd_matrix(&turn_clusters.centroids, k, &river_ground)
-                .unwrap_or_else(|error| abort_emd(&out, "turn-ground-matrix", error));
+            let turn_ground_started = profile_flop_emd.then(Instant::now);
+            let profiled_turn_ground = profile_flop_emd.then(|| {
+                centroid_emd_matrix_profiled(&turn_clusters.centroids, k, &river_ground)
+                    .unwrap_or_else(|error| abort_emd(&out, "turn-ground-matrix", error))
+            });
+            let (turn_ground, turn_ground_emd_calls) = match profiled_turn_ground {
+                Some(profiled) => (profiled.matrix, Some(profiled.emd_calls)),
+                None => (
+                    centroid_emd_matrix(&turn_clusters.centroids, k, &river_ground)
+                        .unwrap_or_else(|error| abort_emd(&out, "turn-ground-matrix", error)),
+                    None,
+                ),
+            };
+            let turn_ground_profile = turn_ground_started
+                .zip(turn_ground_emd_calls)
+                .map(|(started, emd_calls)| (started.elapsed(), emd_calls));
             log.stage("turn-ground-matrix", &format!("end k={k}"));
             log.stage("flop-features", &format!("start k={k}"));
             let flop = PotentialFeatures::build(&deck, 3, &turn.keys, &turn_clusters.assignment, k);
@@ -221,7 +237,7 @@ fn build(args: &[String]) {
                     eprintln!("[{:9.1}s] flop-clustering k={k}, iteration={iteration}, phase=objective-after-update, objective_before={objective_before_update:.9}, objective_after={objective_after_update:.9}", flop_started.elapsed().as_secs_f64());
                 }
             });
-            let flop_clusters = kmeans_emd_with_diagnostics(
+            let profiled_flop_clusters = kmeans_emd_profiled(
                 &flop.distribution,
                 k,
                 &flop.weight,
@@ -231,8 +247,11 @@ fn build(args: &[String]) {
                 iterations,
                 Some(flop_progress),
                 diagnose_final_assignments,
+                profile_flop_emd,
             )
             .unwrap_or_else(|error| abort_emd(&out, "flop-clustering", error));
+            let flop_profile = profiled_flop_clusters.profile;
+            let flop_clusters = profiled_flop_clusters.clustering;
             for (iteration, diagnostic) in flop_clusters.diagnostics.iter().enumerate() {
                 log.stage("flop-clustering", &format!("k={k}, iteration={}, objective_before={:.9}, objective_after={:.9}, moved_weight_fraction={:.9}, occupied_buckets={}", iteration + 1, diagnostic.objective_before_update, diagnostic.objective_after_update, diagnostic.moved_weight_fraction, diagnostic.occupied_buckets));
             }
@@ -249,9 +268,46 @@ fn build(args: &[String]) {
                 &flop_clusters.assignment,
             );
             log.stage("write-flop-table", &format!("end k={k}"));
+            if let (Some((turn_ground_wall_clock, turn_ground_emd_calls)), Some(flop_profile)) =
+                (turn_ground_profile, flop_profile)
+            {
+                let iterations = flop_profile
+                    .iterations
+                    .iter()
+                    .enumerate()
+                    .map(|(index, iteration)| format!(
+                        "{{\"iteration\": {}, \"assignment_wall_seconds\": {:.9}, \"assignment_emd_calls\": {}, \"centroid_update_wall_seconds\": {:.9}, \"objective_after_update_wall_seconds\": {:.9}, \"objective_after_update_emd_calls\": {}}}",
+                        index + 1,
+                        iteration.assignment_wall_clock.as_secs_f64(),
+                        iteration.assignment_emd_calls,
+                        iteration.centroid_update_wall_clock.as_secs_f64(),
+                        iteration.objective_after_update_wall_clock.as_secs_f64(),
+                        iteration.objective_after_update_emd_calls,
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let final_diagnostic = match (
+                    flop_profile.final_assignment_diagnostic_wall_clock,
+                    flop_profile.final_assignment_diagnostic_emd_calls,
+                ) {
+                    (Some(wall_clock), Some(emd_calls)) => format!(
+                        "{{\"wall_seconds\": {:.9}, \"emd_calls\": {emd_calls}}}",
+                        wall_clock.as_secs_f64(),
+                    ),
+                    _ => "null".to_owned(),
+                };
+                profiling_parts.push(format!(
+                    "{{\"k\": {k}, \"turn_ground_matrix\": {{\"wall_seconds\": {:.9}, \"emd_calls\": {turn_ground_emd_calls}}}, \"flop_clustering_wall_seconds\": {:.9}, \"flop_iterations\": [{iterations}], \"final_assignment_diagnostic\": {final_diagnostic}}}",
+                    turn_ground_wall_clock.as_secs_f64(),
+                    flop_profile.wall_clock.as_secs_f64(),
+                ));
+            }
             parts.push(format!("{{\"k\": {k}, \"river_classes\": {}, \"turn_classes\": {}, \"flop_classes\": {}, \"river_objective\": {:?}, \"turn_objective\": {:?}, \"flop_objective\": {:?}}}", river.keys.len(), turn.keys.len(), flop.keys.len(), river_clusters.objective, turn_clusters.objective, flop_clusters.objective));
         }
         summary.push(format!("\"tables\": [{}]", parts.join(", ")));
+        if !profiling_parts.is_empty() {
+            summary.push(format!("\"profiling\": [{}]", profiling_parts.join(", ")));
+        }
         summary.push(format!(
             "\"elapsed_seconds\": {:.1}",
             log.started.elapsed().as_secs_f64()
