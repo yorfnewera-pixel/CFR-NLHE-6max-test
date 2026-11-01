@@ -11,6 +11,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'process-diagnostics.ps1')
+. (Join-Path $PSScriptRoot 'process-supervision.ps1')
 $project = Split-Path -Parent $PSScriptRoot
 $output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) {
@@ -45,40 +47,24 @@ try {
     }) -join ' '
     $command = "`"$binary`" $quotedArguments"
     $command | Set-Content -LiteralPath (Join-Path $output 'command.txt') -Encoding utf8
-    "output_directory=$output" | Set-Content -LiteralPath (Join-Path $output 'launcher-context.txt') -Encoding utf8
+    @(
+        "output_directory=$output"
+        "launcher_utc=$([DateTime]::UtcNow.ToString('o'))"
+        "powershell_version=$($PSVersionTable.PSVersion)"
+        "powershell_edition=$($PSVersionTable.PSEdition)"
+        "dotnet_version=$([Environment]::Version)"
+        "os_version=$([Environment]::OSVersion.VersionString)"
+        "execution_policy_process=$(Get-ExecutionPolicy -Scope Process)"
+    ) | Set-Content -LiteralPath (Join-Path $output 'launcher-context.txt') -Encoding utf8
 
     $previousThreads = $env:RAYON_NUM_THREADS
     $env:RAYON_NUM_THREADS = $Threads.ToString()
-    $process = $null
-    $memoryJob = $null
     try {
-        $process = Start-Process -FilePath $binary -ArgumentList $quotedArguments -PassThru -WindowStyle Hidden `
-            -RedirectStandardOutput (Join-Path $output 'stdout.log') `
-            -RedirectStandardError (Join-Path $output 'stderr.log')
-        $memoryJob = Start-Job -ScriptBlock $ExecutionContext.InvokeCommand.NewScriptBlock("& '$PSScriptRoot\measure-process-memory.ps1' -Process (Get-Process -Id $($process.Id)) -Path '$output\memory.csv'")
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            & taskkill.exe /pid $process.Id /t /f | Out-Null
-            throw "Timed out after $TimeoutSeconds seconds; process was stopped."
-        }
-        Receive-Job -Job $memoryJob -Wait -AutoRemoveJob | Out-Null
-        $process.Refresh()
-        $exitCode = $null
-        try {
-            $exitCode = $process.ExitCode
-        } catch {
-            throw "Generator process exited but its exit code is unavailable. See $output\stderr.log"
-        }
-        if ($null -eq $exitCode) {
-            throw "Generator process exited but its exit code is unavailable. See $output\stderr.log"
-        }
-        "process_id=$($process.Id)`nexit_code=$exitCode" | Add-Content -LiteralPath (Join-Path $output 'launcher-context.txt') -Encoding utf8
-        if ($exitCode -ne 0) { throw "Generator exited with code $exitCode. See $output\stderr.log" }
+        $exitCode = Invoke-SupervisedProcess -FilePath $binary -Arguments $quotedArguments -TimeoutSeconds $TimeoutSeconds `
+            -ContextPath (Join-Path $output 'launcher-context.txt') -StdoutPath (Join-Path $output 'stdout.log') `
+            -StderrPath (Join-Path $output 'stderr.log') -MemoryScriptPath (Join-Path $PSScriptRoot 'measure-process-memory.ps1') `
+            -MemoryPath (Join-Path $output 'memory.csv')
     } finally {
-        if ($memoryJob) {
-            if ($memoryJob.State -eq 'Running') { Stop-Job -Job $memoryJob }
-            Remove-Job -Job $memoryJob -Force -ErrorAction SilentlyContinue
-        }
-        if ($process -and -not $process.HasExited) { & taskkill.exe /pid $process.Id /t /f | Out-Null }
         $env:RAYON_NUM_THREADS = $previousThreads
     }
 
