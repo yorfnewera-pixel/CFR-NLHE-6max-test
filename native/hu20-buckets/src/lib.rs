@@ -1876,6 +1876,118 @@ mod tests {
         (left, right, ground)
     }
 
+    fn flop_no_progress_fixture() -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let left = vec![
+            0.18181819, 0.0, 0.0, 0.72727275, 0.0, 0.0, 0.0, 0.09090909, 0.0, 0.0,
+        ];
+        let right = vec![
+            0.0, 0.0, 0.0, 0.0, 0.54545456, 0.0, 0.27272728, 0.0, 0.18181819, 0.0,
+        ];
+        let ground = vec![
+            0.0,
+            0.13629213,
+            0.08587584,
+            0.27648434,
+            0.25827435,
+            0.014638996,
+            0.058641795,
+            0.7000237,
+            0.4346938,
+            0.181192,
+            0.13629213,
+            0.0,
+            0.050416287,
+            0.19532846,
+            0.12198224,
+            0.12348225,
+            0.07901462,
+            0.5637316,
+            0.29840168,
+            0.08497865,
+            0.08587584,
+            0.050416287,
+            0.0,
+            0.24455096,
+            0.17239852,
+            0.07306597,
+            0.11995916,
+            0.6141479,
+            0.34881797,
+            0.1295547,
+            0.27648434,
+            0.19532846,
+            0.24455096,
+            0.0,
+            0.11568272,
+            0.26367447,
+            0.21920684,
+            0.4235394,
+            0.15820947,
+            0.13901122,
+            0.25827435,
+            0.12198224,
+            0.17239852,
+            0.11568272,
+            0.0,
+            0.24546447,
+            0.20099685,
+            0.44174936,
+            0.17641945,
+            0.0819604,
+            0.014638996,
+            0.12348225,
+            0.07306597,
+            0.26367447,
+            0.24546447,
+            0.0,
+            0.05392626,
+            0.68721384,
+            0.42188394,
+            0.16838212,
+            0.058641795,
+            0.07901462,
+            0.11995916,
+            0.21920684,
+            0.20099685,
+            0.05392626,
+            0.0,
+            0.6427462,
+            0.3774163,
+            0.123914495,
+            0.7000237,
+            0.5637316,
+            0.6141479,
+            0.4235394,
+            0.44174936,
+            0.68721384,
+            0.6427462,
+            0.0,
+            0.26532993,
+            0.51883173,
+            0.4346938,
+            0.29840168,
+            0.34881797,
+            0.15820947,
+            0.17641945,
+            0.42188394,
+            0.3774163,
+            0.26532993,
+            0.0,
+            0.2535018,
+            0.181192,
+            0.08497865,
+            0.1295547,
+            0.13901122,
+            0.0819604,
+            0.16838212,
+            0.123914495,
+            0.51883173,
+            0.2535018,
+            0.0,
+        ];
+        (left, right, ground)
+    }
+
     #[derive(Debug)]
     struct ReducedCostEdgeTrace {
         search_index: usize,
@@ -2295,12 +2407,65 @@ mod tests {
             cost: f64,
             required_mass: f64,
             delivered_mass: f64,
+            accounted_mass: f64,
             searches: Vec<SearchInvariantTrace>,
         },
         NoPath,
         NoProgress,
         IterationLimit,
         InvalidInput,
+    }
+
+    fn test_only_transport_residuals(
+        graph: &[Vec<FlowEdge>],
+        source: usize,
+        sink: usize,
+        dimension: usize,
+    ) -> (f64, f64) {
+        let source_residual = graph[source].iter().map(|edge| edge.capacity).sum();
+        let demand_residual = (0..dimension)
+            .map(|index| {
+                graph[dimension + index]
+                    .iter()
+                    .find(|edge| edge.to == sink)
+                    .expect("demand node must connect to sink")
+                    .capacity
+            })
+            .sum();
+        (source_residual, demand_residual)
+    }
+
+    fn test_only_transport_is_complete(
+        graph: &[Vec<FlowEdge>],
+        source: usize,
+        sink: usize,
+        dimension: usize,
+    ) -> bool {
+        let (source_residual, demand_residual) =
+            test_only_transport_residuals(graph, source, sink, dimension);
+        source_residual <= test_only_completion_tolerance(dimension)
+            && demand_residual <= test_only_completion_tolerance(dimension)
+    }
+
+    fn test_only_apply_augmentation(
+        graph: &mut [Vec<FlowEdge>],
+        path: &[(usize, usize)],
+        sink: usize,
+        amount: f64,
+    ) -> bool {
+        let mut residual_changed = false;
+        let mut node = sink;
+        for &(from, edge) in path {
+            let reverse = graph[from][edge].reverse;
+            let forward_capacity_before = graph[from][edge].capacity;
+            let reverse_capacity_before = graph[node][reverse].capacity;
+            graph[from][edge].capacity -= amount;
+            graph[node][reverse].capacity += amount;
+            residual_changed |= graph[from][edge].capacity != forward_capacity_before
+                || graph[node][reverse].capacity != reverse_capacity_before;
+            node = from;
+        }
+        residual_changed
     }
 
     fn test_only_completion_tolerance(dimension: usize) -> f64 {
@@ -2379,28 +2544,15 @@ mod tests {
         let mut total_cost = 0.0;
         let mut searches = Vec::new();
         for search_index in 0..iteration_limit {
-            if required_mass - delivered <= test_only_completion_tolerance(dimension) {
-                let source_residual: f64 = graph[source].iter().map(|edge| edge.capacity).sum();
-                let demand_residual: f64 = (0..dimension)
-                    .map(|index| {
-                        graph[dimension + index]
-                            .iter()
-                            .find(|edge| edge.to == sink)
-                            .expect("demand node must connect to sink")
-                            .capacity
-                    })
-                    .sum();
-                return if source_residual <= test_only_completion_tolerance(dimension)
-                    && demand_residual <= test_only_completion_tolerance(dimension)
-                {
-                    TestOnlyEmdOutcome::Complete {
-                        cost: total_cost,
-                        required_mass,
-                        delivered_mass: delivered,
-                        searches,
-                    }
-                } else {
-                    TestOnlyEmdOutcome::NoProgress
+            if test_only_transport_is_complete(&graph, source, sink, dimension) {
+                let (source_residual, _) =
+                    test_only_transport_residuals(&graph, source, sink, dimension);
+                return TestOnlyEmdOutcome::Complete {
+                    cost: total_cost,
+                    required_mass,
+                    delivered_mass: required_mass - source_residual,
+                    accounted_mass: delivered,
+                    searches,
                 };
             }
             let mut reachable = vec![false; graph.len()];
@@ -2493,22 +2645,13 @@ mod tests {
             if !amount.is_finite() || amount <= 0.0 {
                 return TestOnlyEmdOutcome::NoProgress;
             }
-            let delivered_before = delivered;
-            let mut capacity_changed = false;
-            let mut node = sink;
             for &(from, edge) in &path {
-                let reverse = graph[from][edge].reverse;
                 total_cost += amount * graph[from][edge].cost;
-                let capacity_before = graph[from][edge].capacity;
-                graph[from][edge].capacity -= amount;
-                capacity_changed |= graph[from][edge].capacity != capacity_before;
-                graph[node][reverse].capacity += amount;
-                node = from;
             }
-            delivered += amount;
-            if delivered <= delivered_before || !capacity_changed {
+            if !test_only_apply_augmentation(&mut graph, &path, sink, amount) {
                 return TestOnlyEmdOutcome::NoProgress;
             }
+            delivered += amount;
         }
         TestOnlyEmdOutcome::IterationLimit
     }
@@ -2607,6 +2750,7 @@ mod tests {
             required_mass,
             delivered_mass,
             searches,
+            ..
         } = outcome
         else {
             panic!("candidate must deliver the full captured transport");
@@ -2619,6 +2763,29 @@ mod tests {
                 .iter()
                 .all(|edge| !edge.from_is_relaxable)
         }));
+    }
+
+    #[test]
+    fn no_threshold_candidate_completes_captured_flop_no_progress_fixture() {
+        let (left, right, ground) = flop_no_progress_fixture();
+
+        let outcome = test_only_emd_without_capacity_threshold(&left, &right, &ground, 10);
+
+        let TestOnlyEmdOutcome::Complete {
+            cost,
+            required_mass,
+            delivered_mass,
+            accounted_mass,
+            ..
+        } = outcome
+        else {
+            panic!("captured point=1, centroid=9 transport must complete");
+        };
+        assert!((required_mass - delivered_mass).abs() <= test_only_completion_tolerance(10));
+        assert!((required_mass - accounted_mass).abs() <= test_only_completion_tolerance(10));
+        let oracle_cost = independent_transport_cost(&left, &right, &ground, 10);
+        assert!((oracle_cost - 0.132_193_286_987_868_22).abs() < 1e-12);
+        assert!((cost - oracle_cost).abs() < 1e-12);
     }
 
     #[test]
@@ -2673,6 +2840,27 @@ mod tests {
             ),
             TestOnlyEmdOutcome::IterationLimit
         ));
+    }
+
+    #[test]
+    fn incomplete_residual_graph_is_not_a_successful_transport() {
+        let source = 4;
+        let sink = 5;
+        let mut graph = vec![Vec::new(); sink + 1];
+        add_flow_edge(&mut graph, source, 0, 0.0, 0.0);
+        add_flow_edge(&mut graph, 2, sink, 0.25, 0.0);
+        add_flow_edge(&mut graph, 3, sink, 0.0, 0.0);
+
+        assert!(!test_only_transport_is_complete(&graph, source, sink, 2));
+    }
+
+    #[test]
+    fn test_only_augmentation_reports_no_progress_when_residual_graph_is_unchanged() {
+        let mut graph = vec![Vec::new(); 2];
+        add_flow_edge(&mut graph, 0, 1, f64::MAX, 0.0);
+        graph[1][0].capacity = f64::MAX;
+
+        assert!(!test_only_apply_augmentation(&mut graph, &[(0, 0)], 1, 1.0));
     }
 
     #[test]
