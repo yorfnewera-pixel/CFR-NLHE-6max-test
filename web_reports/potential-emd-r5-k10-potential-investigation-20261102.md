@@ -2,6 +2,8 @@
 
 Дата: 2026-11-02. Область: только `#[cfg(test)]`; production-решатель и генераторные прогоны не менялись.
 
+Историческая оговорка: это описание исходного сбоя до production-патча. Актуальное состояние ниже: `try_emd` исправлен test-first регрессией; генераторные контрольные прогоны после патча не выполнялись.
+
 ## Воспроизводимость
 
 Сохранённая fixture по-прежнему возвращает `DisconnectedTransportGraph` после шести augmentations. На момент отказа `transport_mass = 0.9999999999999999`, доставлено `0.9999999980131786`, остаток supply `1.9868215267448974e-9`, суммарный остаток demand `1.9868214296003828e-9`, а demand-ребер с capacity строго больше `1e-9` нет.
@@ -50,3 +52,9 @@
 ## Реализованный минимальный production-патч
 
 `try_emd` теперь допускает положительные residual capacities. Успех требует конечной `f64` накопленной и `f32` возвращаемой стоимости, `abs(required − delivered) <= 64 × f64::EPSILON × dimension` и residual source/demand в том же допуске. Существующий `DisconnectedTransportGraph` остаётся `NoPath`; добавлены `NoProgress`, `IterationLimit` и `IncompleteTransport`. Production fixture ranks=5 завершает полный транспорт и совпадает с независимым оракулом. Генераторные запуски не выполнялись.
+
+## Регрессия EMD → generator → launcher
+
+Исполнено: Rust regression записывает реальный `EmdContextError` (stage `assignment`, point `7`, centroid `3`, `DisconnectedTransportGraph`) в `emd-failure-flop-clustering.txt`; статус остаётся `flop-clustering`, `summary.json` отсутствует. Отдельно исполнен `scripts/test-process-diagnostics.ps1`: тестовый child с exit `7` распознан supervisor как отказ, код записан в context, timeout-путь проверяет отсутствие оставшегося дочернего процесса.
+
+Проверено чтением кода: `abort_emd` использует ту же запись диагностики и затем завершает generator panic; launcher вызывает `Invoke-SupervisedProcess`, требует exit `0`, ровно три таблицы, `status.stage == complete` и `summary.json`. Сквозной процесс, в котором именно production generator искусственно получает EMD-ошибку, не запускался: пользовательский failure-флаг не добавлялся и генераторный прогон запрещён текущей задачей.

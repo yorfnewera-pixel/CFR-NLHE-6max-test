@@ -47,13 +47,22 @@ fn write_table(path: &Path, street: u32, k: u32, keys: &[u128], assignment: &[u1
         .expect("table");
 }
 
-fn abort_emd(out: &Path, stage: &str, error: EmdContextError) -> ! {
+fn write_emd_diagnostic(
+    out: &Path,
+    stage: &str,
+    error: &EmdContextError,
+) -> std::io::Result<PathBuf> {
     let path = out.join(format!("emd-failure-{stage}.txt"));
     let diagnostic = format!(
         "code_revision={}\nstage={stage}\n{error:#?}\n",
         code_revision(),
     );
-    atomic_write(&path, diagnostic.as_bytes()).expect("write EMD failure diagnostic");
+    atomic_write(&path, diagnostic.as_bytes())?;
+    Ok(path)
+}
+
+fn abort_emd(out: &Path, stage: &str, error: EmdContextError) -> ! {
+    let path = write_emd_diagnostic(out, stage, &error).expect("write EMD failure diagnostic");
     panic!(
         "EMD failed during {stage}; diagnostic saved to {}",
         path.display()
@@ -423,5 +432,38 @@ mod tests {
     fn code_revision_is_full_git_sha() {
         let revision = code_revision();
         assert!(revision == "unknown" || revision.len() == 40, "{revision}");
+    }
+
+    #[test]
+    fn emd_failure_diagnostic_preserves_context_without_complete_status() {
+        let directory =
+            std::env::temp_dir().join(format!("hu20-emd-failure-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        atomic_write(
+            &directory.join("status.json"),
+            b"{\"stage\":\"flop-clustering\"}\n",
+        )
+        .unwrap();
+        let error = EmdContextError {
+            phase: "assignment",
+            point_index: 7,
+            centroid_index: 3,
+            left: vec![1.0, 0.0],
+            right: vec![0.0, 1.0],
+            ground: vec![0.0, 1.0, 1.0, 0.0],
+            source: EmdError::DisconnectedTransportGraph,
+        };
+        let diagnostic = write_emd_diagnostic(&directory, "flop-clustering", &error).unwrap();
+        let text = fs::read_to_string(diagnostic).unwrap();
+        assert!(text.contains("stage=flop-clustering"));
+        assert!(text.contains("point_index: 7"));
+        assert!(text.contains("centroid_index: 3"));
+        assert!(text.contains("DisconnectedTransportGraph"));
+        assert_ne!(
+            fs::read_to_string(directory.join("status.json")).unwrap(),
+            "{\"stage\":\"complete\"}\n"
+        );
+        assert!(!directory.join("summary.json").exists());
+        fs::remove_dir_all(directory).unwrap();
     }
 }
