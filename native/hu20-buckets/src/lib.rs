@@ -3502,6 +3502,9 @@ mod tests {
         let fifty_diagnostic = fifty_iterations
             .final_assignment_diagnostic
             .expect("requested final turn diagnostic");
+        assert_eq!(fifty_iterations.diagnostics.len(), 17);
+        assert_eq!(fifty_diagnostic.changed_weight_fraction, 0.0);
+        assert!((fifty_diagnostic.objective - 0.032_710_700).abs() < 1e-8);
         println!(
             "turn-trajectory final changed_weight_fraction={:.9} objective={:.9}",
             fifty_diagnostic.changed_weight_fraction, fifty_diagnostic.objective,
@@ -3541,6 +3544,7 @@ mod tests {
             ),
             None => println!("turn-trajectory budget_exhausted iterations=50"),
         }
+        assert_eq!(repeated_state, Some((16, 17)));
     }
 
     #[test]
