@@ -2252,6 +2252,215 @@ mod tests {
         best
     }
 
+    #[derive(Debug)]
+    enum TestOnlyEmdOutcome {
+        Complete {
+            cost: f64,
+            required_mass: f64,
+            delivered_mass: f64,
+            searches: Vec<SearchInvariantTrace>,
+        },
+        NoPath,
+        NoProgress,
+        IterationLimit,
+        InvalidInput,
+    }
+
+    fn test_only_completion_tolerance(dimension: usize) -> f64 {
+        64.0 * f64::EPSILON * dimension as f64
+    }
+
+    fn test_only_emd_without_capacity_threshold(
+        left: &[f32],
+        right: &[f32],
+        ground: &[f32],
+        dimension: usize,
+    ) -> TestOnlyEmdOutcome {
+        if left.len() != dimension
+            || right.len() != dimension
+            || ground.len() != dimension * dimension
+            || left
+                .iter()
+                .chain(right)
+                .any(|mass| !mass.is_finite() || *mass < 0.0)
+            || ground.iter().any(|cost| !cost.is_finite() || *cost < 0.0)
+        {
+            return TestOnlyEmdOutcome::InvalidInput;
+        }
+        let left_mass: f64 = left.iter().map(|&mass| mass as f64).sum();
+        let right_mass: f64 = right.iter().map(|&mass| mass as f64).sum();
+        if left_mass <= 0.0 || right_mass <= 0.0 {
+            return TestOnlyEmdOutcome::InvalidInput;
+        }
+        let normalized_left: Vec<f64> = left.iter().map(|&mass| mass as f64 / left_mass).collect();
+        let normalized_right: Vec<f64> =
+            right.iter().map(|&mass| mass as f64 / right_mass).collect();
+        let required_mass = normalized_left
+            .iter()
+            .sum::<f64>()
+            .min(normalized_right.iter().sum());
+        let source = 2 * dimension;
+        let sink = source + 1;
+        let mut graph = vec![Vec::new(); sink + 1];
+        for index in 0..dimension {
+            add_flow_edge(&mut graph, source, index, normalized_left[index], 0.0);
+            add_flow_edge(
+                &mut graph,
+                dimension + index,
+                sink,
+                normalized_right[index],
+                0.0,
+            );
+            for target in 0..dimension {
+                add_flow_edge(
+                    &mut graph,
+                    index,
+                    dimension + target,
+                    1.0,
+                    ground[index * dimension + target] as f64,
+                );
+            }
+        }
+        let mut potential = vec![0.0; graph.len()];
+        let mut delivered = 0.0;
+        let mut total_cost = 0.0;
+        let mut searches = Vec::new();
+        let iteration_limit = 4 * graph.len() * graph.len();
+        for search_index in 0..iteration_limit {
+            if required_mass - delivered <= test_only_completion_tolerance(dimension) {
+                let source_residual: f64 = graph[source].iter().map(|edge| edge.capacity).sum();
+                let demand_residual: f64 = (0..dimension)
+                    .map(|index| {
+                        graph[dimension + index]
+                            .iter()
+                            .find(|edge| edge.to == sink)
+                            .expect("demand node must connect to sink")
+                            .capacity
+                    })
+                    .sum();
+                return if source_residual <= test_only_completion_tolerance(dimension)
+                    && demand_residual <= test_only_completion_tolerance(dimension)
+                {
+                    TestOnlyEmdOutcome::Complete {
+                        cost: total_cost,
+                        required_mass,
+                        delivered_mass: delivered,
+                        searches,
+                    }
+                } else {
+                    TestOnlyEmdOutcome::NoProgress
+                };
+            }
+            let mut reachable = vec![false; graph.len()];
+            let mut pending = std::collections::VecDeque::from([source]);
+            reachable[source] = true;
+            while let Some(from) = pending.pop_front() {
+                if from == sink {
+                    continue;
+                }
+                for edge in &graph[from] {
+                    if edge.capacity > 0.0 && !reachable[edge.to] {
+                        reachable[edge.to] = true;
+                        pending.push_back(edge.to);
+                    }
+                }
+            }
+            let mut negative_eligible_reduced_cost_edges = Vec::new();
+            for (from, edges) in graph.iter().enumerate() {
+                for edge in edges {
+                    let reduced_cost = edge.cost + potential[from] - potential[edge.to];
+                    if edge.capacity > 0.0 && reduced_cost < 0.0 {
+                        negative_eligible_reduced_cost_edges.push(ReducedCostEdgeTrace {
+                            search_index,
+                            from,
+                            to: edge.to,
+                            capacity: edge.capacity,
+                            from_potential: potential[from],
+                            to_potential: potential[edge.to],
+                            reduced_cost,
+                            from_reachable_from_source: reachable[from],
+                            from_is_relaxable: reachable[from] && from != sink,
+                        });
+                    }
+                }
+            }
+            searches.push(SearchInvariantTrace {
+                search_index,
+                sink_reachable_from_source: reachable[sink],
+                sink_outgoing_eligible_edges: graph[sink]
+                    .iter()
+                    .filter(|edge| edge.capacity > 0.0)
+                    .count(),
+                negative_eligible_reduced_cost_edges,
+            });
+            let mut distance = vec![f64::INFINITY; graph.len()];
+            let mut previous = vec![None; graph.len()];
+            let mut used = vec![false; graph.len()];
+            distance[source] = 0.0;
+            for _ in 0..graph.len() {
+                let next = (0..graph.len())
+                    .filter(|&vertex| !used[vertex])
+                    .min_by(|&left, &right| distance[left].partial_cmp(&distance[right]).unwrap())
+                    .expect("graph must contain an unused vertex");
+                if !distance[next].is_finite() {
+                    break;
+                }
+                used[next] = true;
+                if next == sink {
+                    continue;
+                }
+                for (edge_index, edge) in graph[next].iter().enumerate() {
+                    if edge.capacity <= 0.0 || used[edge.to] {
+                        continue;
+                    }
+                    let candidate =
+                        distance[next] + edge.cost + potential[next] - potential[edge.to];
+                    if candidate < distance[edge.to] {
+                        distance[edge.to] = candidate;
+                        previous[edge.to] = Some((next, edge_index));
+                    }
+                }
+            }
+            if !used[sink] {
+                return TestOnlyEmdOutcome::NoPath;
+            }
+            for vertex in 0..graph.len() {
+                if used[vertex] {
+                    potential[vertex] += distance[vertex];
+                }
+            }
+            let path = match reconstruct_path(&previous, source, sink) {
+                Ok(path) => path,
+                Err(_) => return TestOnlyEmdOutcome::NoProgress,
+            };
+            let amount = path
+                .iter()
+                .fold(required_mass - delivered, |amount, &(from, edge)| {
+                    amount.min(graph[from][edge].capacity)
+                });
+            if !amount.is_finite() || amount <= 0.0 {
+                return TestOnlyEmdOutcome::NoProgress;
+            }
+            let delivered_before = delivered;
+            let mut capacity_changed = false;
+            let mut node = sink;
+            for &(from, edge) in &path {
+                let reverse = graph[from][edge].reverse;
+                total_cost += amount * graph[from][edge].cost;
+                let capacity_before = graph[from][edge].capacity;
+                graph[from][edge].capacity -= amount;
+                capacity_changed |= graph[from][edge].capacity != capacity_before;
+                graph[node][reverse].capacity += amount;
+                node = from;
+            }
+            delivered += amount;
+            if delivered <= delivered_before || !capacity_changed {
+                return TestOnlyEmdOutcome::NoProgress;
+            }
+        }
+        TestOnlyEmdOutcome::IterationLimit
+    }
+
     #[test]
     fn ranks5_failure_fixture_reproduces_disconnected_transport_graph() {
         let (left, right, ground) = ranks5_disconnected_transport_fixture();
@@ -2331,6 +2540,69 @@ mod tests {
             (cost - 0.011_323_424_731_416).abs() < 1e-12,
             "cost={cost:.15}"
         );
+    }
+
+    #[test]
+    fn no_threshold_candidate_completes_ranks5_fixture_at_independent_cost() {
+        let (left, right, ground) = ranks5_disconnected_transport_fixture();
+
+        let outcome = test_only_emd_without_capacity_threshold(&left, &right, &ground, 10);
+
+        let TestOnlyEmdOutcome::Complete {
+            cost,
+            required_mass,
+            delivered_mass,
+            searches,
+        } = outcome
+        else {
+            panic!("candidate must deliver the full captured transport");
+        };
+        assert!((required_mass - delivered_mass).abs() <= test_only_completion_tolerance(10));
+        assert!((cost - independent_transport_cost(&left, &right, &ground, 10)).abs() < 1e-12);
+        assert!(searches.iter().all(|search| {
+            search
+                .negative_eligible_reduced_cost_edges
+                .iter()
+                .all(|edge| !edge.from_is_relaxable)
+        }));
+    }
+
+    #[test]
+    fn no_threshold_candidate_matches_oracle_on_small_residual_and_sparse_cases() {
+        let cases = [
+            (
+                vec![1.0, 2e-9],
+                vec![1.0 - 2e-9, 4e-9],
+                vec![0.0, 3.0, 3.0, 0.0],
+            ),
+            (
+                vec![0.0, 7.0, 0.0, 3.0],
+                vec![0.0, 2.0, 0.0, 8.0],
+                vec![
+                    0.0, 0.0, 4.0, 4.0, 0.0, 0.0, 4.0, 4.0, 4.0, 4.0, 0.0, 0.0, 4.0, 4.0, 0.0, 0.0,
+                ],
+            ),
+        ];
+        for (left, right, ground) in cases {
+            let dimension = left.len();
+            let outcome =
+                test_only_emd_without_capacity_threshold(&left, &right, &ground, dimension);
+            let TestOnlyEmdOutcome::Complete { cost, .. } = outcome else {
+                panic!("candidate must complete valid case");
+            };
+            assert!(
+                (cost - independent_transport_cost(&left, &right, &ground, dimension)).abs()
+                    < 1e-12
+            );
+        }
+    }
+
+    #[test]
+    fn no_threshold_candidate_rejects_invalid_input_without_success() {
+        assert!(matches!(
+            test_only_emd_without_capacity_threshold(&[0.0, 0.0], &[1.0, 0.0], &[0.0; 4], 2),
+            TestOnlyEmdOutcome::InvalidInput
+        ));
     }
 
     #[test]
