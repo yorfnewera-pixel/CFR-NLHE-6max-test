@@ -706,6 +706,25 @@ fn add_flow_edge(graph: &mut [Vec<FlowEdge>], from: usize, to: usize, capacity: 
     graph[to].push(backward);
 }
 
+fn transport_residuals(
+    graph: &[Vec<FlowEdge>],
+    source: usize,
+    sink: usize,
+    dimension: usize,
+) -> (f64, f64) {
+    let source_residual = graph[source].iter().map(|edge| edge.capacity).sum();
+    let demand_residual = (0..dimension)
+        .map(|index| {
+            graph[dimension + index]
+                .iter()
+                .find(|edge| edge.to == sink)
+                .expect("demand node must connect to sink")
+                .capacity
+        })
+        .sum();
+    (source_residual, demand_residual)
+}
+
 fn reconstruct_path(
     previous: &[Option<(usize, usize)>],
     source: usize,
@@ -797,8 +816,12 @@ pub fn try_emd(
     let mut potential = vec![0.0; graph.len()];
     let mut total_cost = 0.0;
     let mut delivered = 0.0;
+    let mut complete = false;
     for _ in 0..iteration_limit {
-        if (transport_mass - delivered).abs() <= completion_tolerance {
+        let (source_residual, demand_residual) =
+            transport_residuals(&graph, source, sink, dimension);
+        if source_residual <= completion_tolerance && demand_residual <= completion_tolerance {
+            complete = true;
             break;
         }
         let mut distance = vec![f64::INFINITY; graph.len()];
@@ -836,45 +859,50 @@ pub fn try_emd(
                 potential[v] += distance[v];
             }
         }
-        let mut amount: f64 = transport_mass - delivered;
         let path = reconstruct_path(&previous, source, sink)?;
+        let mut amount = f64::INFINITY;
         for &(from, edge) in &path {
             amount = amount.min(graph[from][edge].capacity);
         }
         if !amount.is_finite() || amount <= 0.0 {
             return Err(EmdError::InvalidAugmentation);
         }
-        let delivered_before = delivered;
+        let mut residual_capacity_changed = false;
         let mut node = sink;
         for &(from, edge) in &path {
             let reverse = graph[from][edge].reverse;
             total_cost += amount * graph[from][edge].cost;
+            let forward_capacity_before = graph[from][edge].capacity;
+            let reverse_capacity_before = graph[node][reverse].capacity;
             graph[from][edge].capacity -= amount;
             graph[node][reverse].capacity += amount;
+            residual_capacity_changed |= graph[from][edge].capacity != forward_capacity_before
+                || graph[node][reverse].capacity != reverse_capacity_before;
             node = from;
         }
         delivered += amount;
-        // Хотя отдельное большое residual-ребро может не измениться из-за ULP,
-        // неизменившаяся delivered масса означает, что следующий цикл повторит
-        // то же требование транспорта и не может считаться успешным прогрессом.
-        if delivered == delivered_before {
+        if !delivered.is_finite() || !residual_capacity_changed {
             return Err(EmdError::NoProgress);
         }
     }
-    if (transport_mass - delivered).abs() > completion_tolerance {
+    if !complete {
+        let (source_residual, demand_residual) =
+            transport_residuals(&graph, source, sink, dimension);
+        if source_residual <= completion_tolerance && demand_residual <= completion_tolerance {
+            complete = true;
+        }
+    }
+    if !complete {
         return Err(EmdError::IterationLimit);
     }
-    let source_residual: f64 = graph[source].iter().map(|edge| edge.capacity).sum();
-    let demand_residual: f64 = (0..dimension)
-        .map(|index| {
-            graph[dimension + index]
-                .iter()
-                .find(|edge| edge.to == sink)
-                .unwrap()
-                .capacity
-        })
-        .sum();
+    let (source_residual, demand_residual) = transport_residuals(&graph, source, sink, dimension);
     if source_residual > completion_tolerance || demand_residual > completion_tolerance {
+        return Err(EmdError::IncompleteTransport);
+    }
+    let delivered_by_residual = transport_mass - source_residual;
+    if !delivered_by_residual.is_finite()
+        || (transport_mass - delivered_by_residual).abs() > completion_tolerance
+    {
         return Err(EmdError::IncompleteTransport);
     }
     if !total_cost.is_finite() {
@@ -2838,13 +2866,15 @@ mod tests {
     }
 
     #[test]
-    fn captured_flop_no_progress_fixture_production_solver_returns_no_progress() {
+    fn captured_flop_no_progress_fixture_production_solver_completes_at_oracle_cost() {
         let (left, right, ground) = flop_no_progress_fixture();
 
-        assert!(matches!(
-            try_emd(&left, &right, &ground, 10),
-            Err(EmdError::NoProgress)
-        ));
+        let actual = try_emd(&left, &right, &ground, 10)
+            .expect("captured point=1, centroid=9 transport must complete");
+
+        assert!(
+            (actual as f64 - independent_transport_cost(&left, &right, &ground, 10)).abs() < 1e-8
+        );
     }
 
     #[test]
