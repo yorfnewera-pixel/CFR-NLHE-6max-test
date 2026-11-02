@@ -1840,6 +1840,27 @@ mod tests {
     }
 
     #[derive(Debug)]
+    struct ReducedCostEdgeTrace {
+        search_index: usize,
+        from: usize,
+        to: usize,
+        capacity: f64,
+        from_potential: f64,
+        to_potential: f64,
+        reduced_cost: f64,
+        from_reachable_from_source: bool,
+        from_is_relaxable: bool,
+    }
+
+    #[derive(Debug)]
+    struct SearchInvariantTrace {
+        search_index: usize,
+        sink_reachable_from_source: bool,
+        sink_outgoing_eligible_edges: usize,
+        negative_eligible_reduced_cost_edges: Vec<ReducedCostEdgeTrace>,
+    }
+
+    #[derive(Debug)]
     struct EmdFailureTrace {
         transport_mass: f64,
         delivered: f64,
@@ -1850,6 +1871,30 @@ mod tests {
         demand_residual: f64,
         eligible_demand_edges: usize,
         minimum_reduced_cost: f64,
+        first_negative_eligible_reduced_cost: Option<ReducedCostEdgeTrace>,
+        search_invariants: Vec<SearchInvariantTrace>,
+    }
+
+    fn reachable_with_eligible_edges(
+        graph: &[Vec<FlowEdge>],
+        source: usize,
+        sink: usize,
+    ) -> Vec<bool> {
+        let mut reachable = vec![false; graph.len()];
+        let mut pending = std::collections::VecDeque::from([source]);
+        reachable[source] = true;
+        while let Some(from) = pending.pop_front() {
+            if from == sink {
+                continue;
+            }
+            for edge in &graph[from] {
+                if edge.capacity > 1e-9 && !reachable[edge.to] {
+                    reachable[edge.to] = true;
+                    pending.push_back(edge.to);
+                }
+            }
+        }
+        reachable
     }
 
     fn trace_disconnected_transport(
@@ -1895,7 +1940,38 @@ mod tests {
         let mut potential = vec![0.0; graph.len()];
         let mut delivered = 0.0;
         let mut augmentations = 0usize;
+        let mut search_invariants = Vec::new();
         loop {
+            let reachable_before_search = reachable_with_eligible_edges(&graph, source, sink);
+            let mut negative_eligible_reduced_cost_edges = Vec::new();
+            for (from, edges) in graph.iter().enumerate() {
+                for edge in edges {
+                    let reduced_cost = edge.cost + potential[from] - potential[edge.to];
+                    if edge.capacity > 1e-9 && reduced_cost < 0.0 {
+                        negative_eligible_reduced_cost_edges.push(ReducedCostEdgeTrace {
+                            search_index: augmentations,
+                            from,
+                            to: edge.to,
+                            capacity: edge.capacity,
+                            from_potential: potential[from],
+                            to_potential: potential[edge.to],
+                            reduced_cost,
+                            from_reachable_from_source: reachable_before_search[from],
+                            from_is_relaxable: reachable_before_search[from] && from != sink,
+                        });
+                    }
+                }
+            }
+            let sink_outgoing_eligible_edges = graph[sink]
+                .iter()
+                .filter(|edge| edge.capacity > 1e-9)
+                .count();
+            search_invariants.push(SearchInvariantTrace {
+                search_index: augmentations,
+                sink_reachable_from_source: reachable_before_search[sink],
+                sink_outgoing_eligible_edges,
+                negative_eligible_reduced_cost_edges,
+            });
             let mut distance = vec![f64::INFINITY; graph.len()];
             let mut previous = vec![None; graph.len()];
             let mut used = vec![false; graph.len()];
@@ -1962,6 +2038,22 @@ mod tests {
                         .filter(|&&capacity| capacity > 1e-9)
                         .count(),
                     minimum_reduced_cost,
+                    first_negative_eligible_reduced_cost: search_invariants
+                        .iter()
+                        .flat_map(|search| &search.negative_eligible_reduced_cost_edges)
+                        .next()
+                        .map(|edge| ReducedCostEdgeTrace {
+                            search_index: edge.search_index,
+                            from: edge.from,
+                            to: edge.to,
+                            capacity: edge.capacity,
+                            from_potential: edge.from_potential,
+                            to_potential: edge.to_potential,
+                            reduced_cost: edge.reduced_cost,
+                            from_reachable_from_source: edge.from_reachable_from_source,
+                            from_is_relaxable: edge.from_is_relaxable,
+                        }),
+                    search_invariants,
                 };
             }
             for vertex in 0..graph.len() {
@@ -1984,6 +2076,180 @@ mod tests {
             delivered += amount;
             augmentations += 1;
         }
+    }
+
+    fn independent_transport_cost(
+        left: &[f32],
+        right: &[f32],
+        ground: &[f32],
+        dimension: usize,
+    ) -> f64 {
+        const TOLERANCE: f64 = 1e-12;
+
+        fn solve_linear_system(mut matrix: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> Option<Vec<f64>> {
+            for pivot_column in 0..rhs.len() {
+                let pivot_row = (pivot_column..rhs.len()).max_by(|&left, &right| {
+                    matrix[left][pivot_column]
+                        .abs()
+                        .partial_cmp(&matrix[right][pivot_column].abs())
+                        .unwrap()
+                })?;
+                if matrix[pivot_row][pivot_column].abs() <= TOLERANCE {
+                    return None;
+                }
+                matrix.swap(pivot_column, pivot_row);
+                rhs.swap(pivot_column, pivot_row);
+                let pivot = matrix[pivot_column][pivot_column];
+                for column in pivot_column..rhs.len() {
+                    matrix[pivot_column][column] /= pivot;
+                }
+                rhs[pivot_column] /= pivot;
+                for row in 0..rhs.len() {
+                    if row == pivot_column {
+                        continue;
+                    }
+                    let factor = matrix[row][pivot_column];
+                    for column in pivot_column..rhs.len() {
+                        matrix[row][column] -= factor * matrix[pivot_column][column];
+                    }
+                    rhs[row] -= factor * rhs[pivot_column];
+                }
+            }
+            Some(rhs)
+        }
+
+        fn evaluate_basis(
+            selected: &[usize],
+            edges: &[(usize, usize)],
+            sources: &[usize],
+            targets: &[usize],
+            supply: &[f64],
+            demand: &[f64],
+            ground: &[f32],
+            dimension: usize,
+        ) -> Option<f64> {
+            let equations = selected.len();
+            let mut matrix = vec![vec![0.0; equations]; equations];
+            let mut rhs = Vec::with_capacity(equations);
+            for (row, &mass) in supply.iter().enumerate() {
+                for (column, &edge) in selected.iter().enumerate() {
+                    matrix[row][column] = (edges[edge].0 == sources[row]) as u8 as f64;
+                }
+                rhs.push(mass);
+            }
+            for (offset, &mass) in demand.iter().take(demand.len() - 1).enumerate() {
+                let row = supply.len() + offset;
+                for (column, &edge) in selected.iter().enumerate() {
+                    matrix[row][column] = (edges[edge].1 == targets[offset]) as u8 as f64;
+                }
+                rhs.push(mass);
+            }
+            let flow = solve_linear_system(matrix, rhs)?;
+            if flow.iter().any(|&mass| mass < -TOLERANCE) {
+                return None;
+            }
+            let mut delivered = vec![0.0; demand.len()];
+            let mut cost = 0.0;
+            for (&edge, &mass) in selected.iter().zip(&flow) {
+                let (source, target) = edges[edge];
+                let mass = mass.max(0.0);
+                let compact_target = targets
+                    .iter()
+                    .position(|&candidate| candidate == target)
+                    .expect("basis target must be present in the demand support");
+                delivered[compact_target] += mass;
+                cost += mass * ground[source * dimension + target] as f64;
+            }
+            (delivered
+                .iter()
+                .zip(demand)
+                .all(|(&actual, &expected)| (actual - expected).abs() <= TOLERANCE))
+            .then_some(cost)
+        }
+
+        fn enumerate_bases(
+            edge_index: usize,
+            selected: &mut Vec<usize>,
+            edges: &[(usize, usize)],
+            sources: &[usize],
+            targets: &[usize],
+            basis_size: usize,
+            supply: &[f64],
+            demand: &[f64],
+            ground: &[f32],
+            dimension: usize,
+            best: &mut f64,
+        ) {
+            if selected.len() == basis_size {
+                if let Some(cost) = evaluate_basis(
+                    selected, edges, sources, targets, supply, demand, ground, dimension,
+                ) {
+                    *best = best.min(cost);
+                }
+                return;
+            }
+            if edges.len() - edge_index < basis_size - selected.len() {
+                return;
+            }
+            for next in edge_index..edges.len() {
+                selected.push(next);
+                enumerate_bases(
+                    next + 1,
+                    selected,
+                    edges,
+                    sources,
+                    targets,
+                    basis_size,
+                    supply,
+                    demand,
+                    ground,
+                    dimension,
+                    best,
+                );
+                selected.pop();
+            }
+        }
+
+        let left_mass: f64 = left.iter().map(|&mass| mass as f64).sum();
+        let right_mass: f64 = right.iter().map(|&mass| mass as f64).sum();
+        let supply: Vec<f64> = left
+            .iter()
+            .filter_map(|&mass| (mass > 0.0).then_some(mass as f64 / left_mass))
+            .collect();
+        let demand: Vec<f64> = right
+            .iter()
+            .filter_map(|&mass| (mass > 0.0).then_some(mass as f64 / right_mass))
+            .collect();
+        let sources: Vec<usize> = left
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &mass)| (mass > 0.0).then_some(index))
+            .collect();
+        let targets: Vec<usize> = right
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &mass)| (mass > 0.0).then_some(index))
+            .collect();
+        let edges: Vec<(usize, usize)> = sources
+            .iter()
+            .flat_map(|&source| targets.iter().map(move |&target| (source, target)))
+            .collect();
+        let basis_size = supply.len() + demand.len() - 1;
+        let mut best = f64::INFINITY;
+        enumerate_bases(
+            0,
+            &mut Vec::with_capacity(basis_size),
+            &edges,
+            &sources,
+            &targets,
+            basis_size,
+            &supply,
+            &demand,
+            ground,
+            dimension,
+            &mut best,
+        );
+        best
     }
 
     #[test]
@@ -2010,6 +2276,70 @@ mod tests {
         assert!(trace.demand_residual > 1e-9);
         assert_eq!(trace.eligible_demand_edges, 0);
         assert!(trace.minimum_reduced_cost.is_sign_negative());
+    }
+
+    #[test]
+    fn ranks5_failure_fixture_identifies_negative_eligible_reduced_cost_before_search() {
+        let (left, right, ground) = ranks5_disconnected_transport_fixture();
+        let trace = trace_disconnected_transport(&left, &right, &ground, 10);
+
+        let edge = trace
+            .first_negative_eligible_reduced_cost
+            .expect("fixture must identify the first negative eligible reduced-cost edge");
+        assert!(edge.reduced_cost < 0.0);
+        assert_eq!(edge.search_index, 1);
+        assert!(edge.capacity > 1e-9);
+        assert!(edge.from_potential.is_finite());
+        assert!(edge.to_potential.is_finite());
+        assert!(!edge.from_reachable_from_source);
+    }
+
+    #[test]
+    fn ranks5_failure_fixture_has_no_negative_reduced_cost_on_relaxable_edges() {
+        let (left, right, ground) = ranks5_disconnected_transport_fixture();
+        let trace = trace_disconnected_transport(&left, &right, &ground, 10);
+
+        assert!(trace.search_invariants.iter().all(|search| {
+            search
+                .negative_eligible_reduced_cost_edges
+                .iter()
+                .all(|edge| !edge.from_is_relaxable)
+        }));
+        assert!(trace
+            .search_invariants
+            .iter()
+            .enumerate()
+            .all(|(index, search)| search.search_index == index));
+        assert!(trace
+            .search_invariants
+            .iter()
+            .any(|search| search.sink_outgoing_eligible_edges > 0));
+        assert!(trace
+            .search_invariants
+            .iter()
+            .any(|search| !search.sink_reachable_from_source));
+    }
+
+    #[test]
+    fn ranks5_failure_fixture_has_finite_independent_transport_cost() {
+        let (left, right, ground) = ranks5_disconnected_transport_fixture();
+
+        let cost = independent_transport_cost(&left, &right, &ground, 10);
+
+        assert!(cost.is_finite());
+        assert!(
+            (cost - 0.011_323_424_731_416).abs() < 1e-12,
+            "cost={cost:.15}"
+        );
+    }
+
+    #[test]
+    fn independent_transport_oracle_finds_optimal_non_greedy_split() {
+        let left = [8.0, 1.0, 3.0];
+        let right = [5.0, 5.0, 2.0];
+        let ground = [0.0, 0.0, 100.0, 0.0, 100.0, 100.0, 100.0, 0.0, 0.0];
+
+        assert_eq!(independent_transport_cost(&left, &right, &ground, 3), 0.0);
     }
 
     #[test]
