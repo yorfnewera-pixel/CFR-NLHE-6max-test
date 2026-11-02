@@ -3433,6 +3433,116 @@ mod tests {
         }
     }
 
+    /// Одноразовый test-only probe для контроля `ranks=5, K=20`.
+    ///
+    /// Не вызывается production-кодом и не меняет сохраняемые таблицы: повторно
+    /// строит только river/turn, сверяет первые 10 итераций с зафиксированным
+    /// контролем, затем наблюдает ту же детерминированную траекторию до 50.
+    #[test]
+    #[ignore = "ручное test-only расследование траектории turn; запускать с --ignored --nocapture"]
+    fn test_only_ranks5_turn_k20_trajectory_to_fifty_iterations() {
+        const K: usize = 20;
+        const SEED: u64 = 202_610_050_003;
+        const FIRST_CONTROL_TURN_OBJECTIVE: f64 = 0.033_152_026_385_421_3;
+        const FIRST_CONTROL_FINAL_OBJECTIVE: f64 = 0.032_777_321;
+        const FIRST_CONTROL_CHANGED_WEIGHT: f64 = 0.008_957_688;
+
+        let deck = deck(5);
+        let river = RiverTable::build(&deck);
+        let river_clusters = kmeans(&river.equity, 1, &river.weight, K, SEED, 10);
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, K);
+
+        let ten_iterations = kmeans_wasserstein_1d_with_diagnostics(
+            &turn.distribution,
+            &turn.weight,
+            &river_clusters.centroids,
+            K,
+            SEED,
+            10,
+            true,
+        );
+        assert_eq!(ten_iterations.diagnostics.len(), 10);
+        assert!(
+            (ten_iterations
+                .objective
+                .last()
+                .copied()
+                .expect("10 objectives")
+                - FIRST_CONTROL_TURN_OBJECTIVE)
+                .abs()
+                < 1e-12
+        );
+        let ten_diagnostic = ten_iterations
+            .final_assignment_diagnostic
+            .expect("requested final turn diagnostic");
+        assert!((ten_diagnostic.objective - FIRST_CONTROL_FINAL_OBJECTIVE).abs() < 1e-8);
+        assert!(
+            (ten_diagnostic.changed_weight_fraction - FIRST_CONTROL_CHANGED_WEIGHT).abs() < 1e-8
+        );
+
+        let fifty_iterations = kmeans_wasserstein_1d_with_diagnostics(
+            &turn.distribution,
+            &turn.weight,
+            &river_clusters.centroids,
+            K,
+            SEED,
+            50,
+            true,
+        );
+        for (iteration, diagnostic) in fifty_iterations.diagnostics.iter().enumerate() {
+            println!(
+                "turn-trajectory iteration={} objective_before={:.9} objective_after={:.9} moved_weight_fraction={:.9} occupied_buckets={}",
+                iteration + 1,
+                diagnostic.objective_before_update,
+                diagnostic.objective_after_update,
+                diagnostic.moved_weight_fraction,
+                diagnostic.occupied_buckets,
+            );
+        }
+        let fifty_diagnostic = fifty_iterations
+            .final_assignment_diagnostic
+            .expect("requested final turn diagnostic");
+        println!(
+            "turn-trajectory final changed_weight_fraction={:.9} objective={:.9}",
+            fifty_diagnostic.changed_weight_fraction, fifty_diagnostic.objective,
+        );
+
+        let mut seen = std::collections::HashMap::<Vec<u32>, usize>::new();
+        let mut repeated_state = None;
+        for iteration_limit in 1..=50 {
+            let clustering = kmeans_wasserstein_1d_with_diagnostics(
+                &turn.distribution,
+                &turn.weight,
+                &river_clusters.centroids,
+                K,
+                SEED,
+                iteration_limit,
+                false,
+            );
+            let state = clustering
+                .assignment
+                .iter()
+                .map(|&assignment| assignment as u32)
+                .chain(clustering.centroids.iter().map(|value| value.to_bits()))
+                .collect::<Vec<_>>();
+            if let Some(first_seen_at) = seen.insert(state, iteration_limit) {
+                repeated_state = Some((first_seen_at, iteration_limit));
+                break;
+            }
+        }
+        match repeated_state {
+            Some((first_seen_at, repeated_at)) if repeated_at == first_seen_at + 1 => println!(
+                "turn-trajectory stabilization first_seen_at={} repeated_at={}",
+                first_seen_at, repeated_at
+            ),
+            Some((first_seen_at, repeated_at)) => println!(
+                "turn-trajectory cycle first_seen_at={} repeated_at={}",
+                first_seen_at, repeated_at
+            ),
+            None => println!("turn-trajectory budget_exhausted iterations=50"),
+        }
+    }
+
     #[test]
     fn centroid_emd_matrix_uses_lower_street_metric() {
         let lower = vec![0.0, 2.0, 2.0, 0.0];
