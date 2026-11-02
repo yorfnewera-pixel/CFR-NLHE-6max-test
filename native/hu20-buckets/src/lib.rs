@@ -2276,6 +2276,22 @@ mod tests {
         ground: &[f32],
         dimension: usize,
     ) -> TestOnlyEmdOutcome {
+        test_only_emd_without_capacity_threshold_with_limit(
+            left,
+            right,
+            ground,
+            dimension,
+            4 * (2 * dimension + 2).pow(2),
+        )
+    }
+
+    fn test_only_emd_without_capacity_threshold_with_limit(
+        left: &[f32],
+        right: &[f32],
+        ground: &[f32],
+        dimension: usize,
+        iteration_limit: usize,
+    ) -> TestOnlyEmdOutcome {
         if left.len() != dimension
             || right.len() != dimension
             || ground.len() != dimension * dimension
@@ -2325,7 +2341,6 @@ mod tests {
         let mut delivered = 0.0;
         let mut total_cost = 0.0;
         let mut searches = Vec::new();
-        let iteration_limit = 4 * graph.len() * graph.len();
         for search_index in 0..iteration_limit {
             if required_mass - delivered <= test_only_completion_tolerance(dimension) {
                 let source_residual: f64 = graph[source].iter().map(|edge| edge.capacity).sum();
@@ -2602,6 +2617,22 @@ mod tests {
         assert!(matches!(
             test_only_emd_without_capacity_threshold(&[0.0, 0.0], &[1.0, 0.0], &[0.0; 4], 2),
             TestOnlyEmdOutcome::InvalidInput
+        ));
+    }
+
+    #[test]
+    fn no_threshold_candidate_reports_iteration_limit_without_partial_success() {
+        let ground = [0.0, 1.0, 1.0, 0.0];
+
+        assert!(matches!(
+            test_only_emd_without_capacity_threshold_with_limit(
+                &[1.0, 0.0],
+                &[0.0, 1.0],
+                &ground,
+                2,
+                0,
+            ),
+            TestOnlyEmdOutcome::IterationLimit
         ));
     }
 
