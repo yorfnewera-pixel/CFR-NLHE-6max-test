@@ -2409,11 +2409,33 @@ mod tests {
             delivered_mass: f64,
             accounted_mass: f64,
             searches: Vec<SearchInvariantTrace>,
+            augmentations: Vec<AugmentationTrace>,
         },
         NoPath,
         NoProgress,
         IterationLimit,
         InvalidInput,
+    }
+
+    #[derive(Debug)]
+    struct AugmentationTrace {
+        amount: f64,
+        delivered_before: f64,
+        delivered_after: f64,
+        forward_capacity_changed: bool,
+        reverse_capacity_changed: bool,
+    }
+
+    #[derive(Debug)]
+    struct ResidualChange {
+        forward_capacity_changed: bool,
+        reverse_capacity_changed: bool,
+    }
+
+    impl ResidualChange {
+        fn changed(&self) -> bool {
+            self.forward_capacity_changed || self.reverse_capacity_changed
+        }
     }
 
     fn test_only_transport_residuals(
@@ -2452,8 +2474,9 @@ mod tests {
         path: &[(usize, usize)],
         sink: usize,
         amount: f64,
-    ) -> bool {
-        let mut residual_changed = false;
+    ) -> ResidualChange {
+        let mut forward_capacity_changed = false;
+        let mut reverse_capacity_changed = false;
         let mut node = sink;
         for &(from, edge) in path {
             let reverse = graph[from][edge].reverse;
@@ -2461,11 +2484,14 @@ mod tests {
             let reverse_capacity_before = graph[node][reverse].capacity;
             graph[from][edge].capacity -= amount;
             graph[node][reverse].capacity += amount;
-            residual_changed |= graph[from][edge].capacity != forward_capacity_before
-                || graph[node][reverse].capacity != reverse_capacity_before;
+            forward_capacity_changed |= graph[from][edge].capacity != forward_capacity_before;
+            reverse_capacity_changed |= graph[node][reverse].capacity != reverse_capacity_before;
             node = from;
         }
-        residual_changed
+        ResidualChange {
+            forward_capacity_changed,
+            reverse_capacity_changed,
+        }
     }
 
     fn test_only_completion_tolerance(dimension: usize) -> f64 {
@@ -2493,6 +2519,40 @@ mod tests {
         ground: &[f32],
         dimension: usize,
         iteration_limit: usize,
+    ) -> TestOnlyEmdOutcome {
+        test_only_emd_with_residual_bottleneck(
+            left,
+            right,
+            ground,
+            dimension,
+            iteration_limit,
+            true,
+        )
+    }
+
+    fn test_only_emd_without_delivered_amount_cap(
+        left: &[f32],
+        right: &[f32],
+        ground: &[f32],
+        dimension: usize,
+    ) -> TestOnlyEmdOutcome {
+        test_only_emd_with_residual_bottleneck(
+            left,
+            right,
+            ground,
+            dimension,
+            4 * (2 * dimension + 2).pow(2),
+            false,
+        )
+    }
+
+    fn test_only_emd_with_residual_bottleneck(
+        left: &[f32],
+        right: &[f32],
+        ground: &[f32],
+        dimension: usize,
+        iteration_limit: usize,
+        cap_amount_by_delivered_mass: bool,
     ) -> TestOnlyEmdOutcome {
         if left.len() != dimension
             || right.len() != dimension
@@ -2543,6 +2603,7 @@ mod tests {
         let mut delivered = 0.0;
         let mut total_cost = 0.0;
         let mut searches = Vec::new();
+        let mut augmentations = Vec::new();
         for search_index in 0..iteration_limit {
             if test_only_transport_is_complete(&graph, source, sink, dimension) {
                 let (source_residual, _) =
@@ -2553,6 +2614,7 @@ mod tests {
                     delivered_mass: required_mass - source_residual,
                     accounted_mass: delivered,
                     searches,
+                    augmentations,
                 };
             }
             let mut reachable = vec![false; graph.len()];
@@ -2637,21 +2699,31 @@ mod tests {
                 Ok(path) => path,
                 Err(_) => return TestOnlyEmdOutcome::NoProgress,
             };
-            let amount = path
-                .iter()
-                .fold(required_mass - delivered, |amount, &(from, edge)| {
-                    amount.min(graph[from][edge].capacity)
-                });
+            let initial_amount = cap_amount_by_delivered_mass
+                .then_some(required_mass - delivered)
+                .unwrap_or(f64::INFINITY);
+            let amount = path.iter().fold(initial_amount, |amount, &(from, edge)| {
+                amount.min(graph[from][edge].capacity)
+            });
             if !amount.is_finite() || amount <= 0.0 {
                 return TestOnlyEmdOutcome::NoProgress;
             }
             for &(from, edge) in &path {
                 total_cost += amount * graph[from][edge].cost;
             }
-            if !test_only_apply_augmentation(&mut graph, &path, sink, amount) {
+            let delivered_before = delivered;
+            let residual_change = test_only_apply_augmentation(&mut graph, &path, sink, amount);
+            delivered += amount;
+            augmentations.push(AugmentationTrace {
+                amount,
+                delivered_before,
+                delivered_after: delivered,
+                forward_capacity_changed: residual_change.forward_capacity_changed,
+                reverse_capacity_changed: residual_change.reverse_capacity_changed,
+            });
+            if !residual_change.changed() {
                 return TestOnlyEmdOutcome::NoProgress;
             }
-            delivered += amount;
         }
         TestOnlyEmdOutcome::IterationLimit
     }
@@ -2766,6 +2838,16 @@ mod tests {
     }
 
     #[test]
+    fn captured_flop_no_progress_fixture_production_solver_returns_no_progress() {
+        let (left, right, ground) = flop_no_progress_fixture();
+
+        assert!(matches!(
+            try_emd(&left, &right, &ground, 10),
+            Err(EmdError::NoProgress)
+        ));
+    }
+
+    #[test]
     fn no_threshold_candidate_completes_captured_flop_no_progress_fixture() {
         let (left, right, ground) = flop_no_progress_fixture();
 
@@ -2776,6 +2858,7 @@ mod tests {
             required_mass,
             delivered_mass,
             accounted_mass,
+            augmentations,
             ..
         } = outcome
         else {
@@ -2783,9 +2866,39 @@ mod tests {
         };
         assert!((required_mass - delivered_mass).abs() <= test_only_completion_tolerance(10));
         assert!((required_mass - accounted_mass).abs() <= test_only_completion_tolerance(10));
+        assert!(augmentations.iter().any(|augmentation| {
+            augmentation.amount > 0.0
+                && augmentation.delivered_before == augmentation.delivered_after
+                && (augmentation.forward_capacity_changed || augmentation.reverse_capacity_changed)
+        }));
         let oracle_cost = independent_transport_cost(&left, &right, &ground, 10);
         assert!((oracle_cost - 0.132_193_286_987_868_22).abs() < 1e-12);
         assert!((cost - oracle_cost).abs() < 1e-12);
+    }
+
+    #[test]
+    fn residual_bottleneck_candidate_completes_captured_flop_fixture_at_oracle_cost() {
+        let (left, right, ground) = flop_no_progress_fixture();
+
+        let outcome = test_only_emd_without_delivered_amount_cap(&left, &right, &ground, 10);
+
+        let TestOnlyEmdOutcome::Complete {
+            cost,
+            required_mass,
+            delivered_mass,
+            augmentations,
+            ..
+        } = outcome
+        else {
+            panic!("residual-bottleneck candidate must complete captured transport");
+        };
+        assert!((required_mass - delivered_mass).abs() <= test_only_completion_tolerance(10));
+        assert!(augmentations.iter().any(|augmentation| {
+            augmentation.amount > 0.0
+                && augmentation.delivered_before == augmentation.delivered_after
+                && (augmentation.forward_capacity_changed || augmentation.reverse_capacity_changed)
+        }));
+        assert!((cost - independent_transport_cost(&left, &right, &ground, 10)).abs() < 1e-12);
     }
 
     #[test]
@@ -2860,7 +2973,7 @@ mod tests {
         add_flow_edge(&mut graph, 0, 1, f64::MAX, 0.0);
         graph[1][0].capacity = f64::MAX;
 
-        assert!(!test_only_apply_augmentation(&mut graph, &[(0, 0)], 1, 1.0));
+        assert!(!test_only_apply_augmentation(&mut graph, &[(0, 0)], 1, 1.0).changed());
     }
 
     #[test]

@@ -152,4 +152,4 @@ Production-регрессия сохранённой fixture теперь про
 
 ## Test-only регрессия `NoProgress`: point=1, centroid=9
 
-Дата: 2026-11-02. Сохранённая flop fixture завершена test-only кандидатом с полным residual-транспортом и стоимостью независимого оракула `0.13219328698786822`. Проверки покрытия `NoProgress`, неполного транспорта и бюджета итераций пройдены; генератор и production-код в этой работе не менялись. Полный отчёт: `web_reports/potential-emd-no-progress-test-regression-20261102.md`.
+Дата: 2026-11-02. Прямой тест подтверждает, что текущий `try_emd` возвращает `NoProgress` на сохранённой flop fixture. Test-only трасса augmentation установила положительный `amount` с неизменившимся `delivered` и изменённым residual-графом. Вариант без ограничения bottleneck выражением `required_mass - delivered` завершает полный транспорт и совпадает с независимой стоимостью `0.13219328698786822`. Проверки покрытия `NoProgress`, неполного транспорта и бюджета итераций пройдены; генератор и production-код в этой работе не менялись. Полный отчёт: `web_reports/potential-emd-no-progress-test-regression-20261102.md`.
