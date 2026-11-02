@@ -19,7 +19,7 @@
 
 ## Установленная причина
 
-Прямой characterization-тест подтвердил: текущий production `try_emd` на fixture
+Прямой characterization-тест до production-патча подтвердил: `try_emd` на fixture
 возвращает именно `EmdError::NoProgress`.
 
 Test-only трасса записывает для каждой augmentation `amount`, `delivered` до и
@@ -44,7 +44,7 @@ Test-only кандидат считает транспорт завершённ�
 | Проверка | Результат |
 | --- | --- |
 | Новая fixture `point=1`, `centroid=9` завершает полный транспорт | пройдено |
-| Текущий production `try_emd` возвращает именно `EmdError::NoProgress` | пройдено |
+| `try_emd` до production-патча возвращает именно `EmdError::NoProgress` | пройдено |
 | Трасса содержит положительный `amount` с неизменным `delivered` и изменённым residual-графом | пройдено |
 | Полнота транспорта по residual supply/demand | пройдено |
 | Конечность и совпадение стоимости с независимым транспортным оракулом | пройдено |
