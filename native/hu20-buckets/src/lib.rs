@@ -626,6 +626,9 @@ pub enum EmdError {
     PredecessorCycle { node: usize },
     MissingPredecessor { node: usize },
     InvalidAugmentation,
+    NoProgress,
+    IterationLimit,
+    IncompleteTransport,
     NonFiniteResult,
 }
 
@@ -787,10 +790,17 @@ pub fn try_emd(
             );
         }
     }
+    // Распределения нормированы к масштабу единицы; допуск покрывает только
+    // накопление операций f64, а не разрешает отбросить значимую массу.
+    let completion_tolerance = 64.0 * f64::EPSILON * dimension as f64;
+    let iteration_limit = 4usize.saturating_mul(graph.len().saturating_mul(graph.len()));
     let mut potential = vec![0.0; graph.len()];
     let mut total_cost = 0.0;
     let mut delivered = 0.0;
-    while delivered + 1e-9 < transport_mass {
+    for _ in 0..iteration_limit {
+        if (transport_mass - delivered).abs() <= completion_tolerance {
+            break;
+        }
         let mut distance = vec![f64::INFINITY; graph.len()];
         let mut previous = vec![None; graph.len()];
         let mut used = vec![false; graph.len()];
@@ -808,7 +818,7 @@ pub fn try_emd(
                 continue;
             }
             for (edge_index, edge) in graph[next].iter().enumerate() {
-                if edge.capacity <= 1e-9 || used[edge.to] {
+                if edge.capacity <= 0.0 || used[edge.to] {
                     continue;
                 }
                 let candidate = distance[next] + edge.cost + potential[next] - potential[edge.to];
@@ -831,9 +841,10 @@ pub fn try_emd(
         for &(from, edge) in &path {
             amount = amount.min(graph[from][edge].capacity);
         }
-        if !amount.is_finite() || amount <= 1e-9 {
+        if !amount.is_finite() || amount <= 0.0 {
             return Err(EmdError::InvalidAugmentation);
         }
+        let delivered_before = delivered;
         let mut node = sink;
         for &(from, edge) in &path {
             let reverse = graph[from][edge].reverse;
@@ -843,11 +854,37 @@ pub fn try_emd(
             node = from;
         }
         delivered += amount;
+        // Хотя отдельное большое residual-ребро может не измениться из-за ULP,
+        // неизменившаяся delivered масса означает, что следующий цикл повторит
+        // то же требование транспорта и не может считаться успешным прогрессом.
+        if delivered == delivered_before {
+            return Err(EmdError::NoProgress);
+        }
+    }
+    if (transport_mass - delivered).abs() > completion_tolerance {
+        return Err(EmdError::IterationLimit);
+    }
+    let source_residual: f64 = graph[source].iter().map(|edge| edge.capacity).sum();
+    let demand_residual: f64 = (0..dimension)
+        .map(|index| {
+            graph[dimension + index]
+                .iter()
+                .find(|edge| edge.to == sink)
+                .unwrap()
+                .capacity
+        })
+        .sum();
+    if source_residual > completion_tolerance || demand_residual > completion_tolerance {
+        return Err(EmdError::IncompleteTransport);
     }
     if !total_cost.is_finite() {
         return Err(EmdError::NonFiniteResult);
     }
-    Ok(total_cost as f32)
+    let result = total_cost as f32;
+    if !result.is_finite() {
+        return Err(EmdError::NonFiniteResult);
+    }
+    Ok(result)
 }
 
 /// Совместимая обёртка для существующих вызовов без контекста задачи.
@@ -2477,13 +2514,15 @@ mod tests {
     }
 
     #[test]
-    fn ranks5_failure_fixture_reproduces_disconnected_transport_graph() {
+    fn ranks5_failure_fixture_production_solver_matches_independent_cost() {
         let (left, right, ground) = ranks5_disconnected_transport_fixture();
 
-        let error = try_emd(&left, &right, &ground, 10)
-            .expect_err("captured ranks=5 flop assignment must fail");
+        let actual = try_emd(&left, &right, &ground, 10)
+            .expect("captured ranks=5 transport must now complete");
 
-        assert!(matches!(error, EmdError::DisconnectedTransportGraph));
+        assert!(
+            (actual as f64 - independent_transport_cost(&left, &right, &ground, 10)).abs() < 1e-8
+        );
     }
 
     #[test]

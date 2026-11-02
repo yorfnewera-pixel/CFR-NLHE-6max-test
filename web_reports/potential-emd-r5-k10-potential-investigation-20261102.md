@@ -46,3 +46,7 @@
 Минимальная правка допускает residual capacity при `> 0.0`, но успешный `Ok(cost)` возможен только при конечной стоимости и одновременном выполнении трёх проверок: `required - delivered`, сумма residual supply и сумма residual demand не больше `64 × f64::EPSILON × dimension`. Допуск применим к уже нормированным `f32` распределениям масштаба единицы; это запас для накопления операций `f64`, а не разрешение потерять значимую массу.
 
 `NoPath`, `NoProgress`, `IterationLimit`, `IncompleteTransport` и некорректный вход должны проходить существующий `Result`/`EmdContextError` путь как ошибки. Они не дают частичную стоимость, не создают успешный status и не запускают panic там, где доступен `Result`. Бюджет `4 × (2 × dimension + 2)^2` — только гарантия конечного выхода с диагностической ошибкой; он не доказывает успех для всех допустимых `f64` входов. Test-only бюджет `0` покрыт и возвращает `IterationLimit` без успеха.
+
+## Реализованный минимальный production-патч
+
+`try_emd` теперь допускает положительные residual capacities. Успех требует конечной `f64` накопленной и `f32` возвращаемой стоимости, `abs(required − delivered) <= 64 × f64::EPSILON × dimension` и residual source/demand в том же допуске. Существующий `DisconnectedTransportGraph` остаётся `NoPath`; добавлены `NoProgress`, `IterationLimit` и `IncompleteTransport`. Production fixture ranks=5 завершает полный транспорт и совпадает с независимым оракулом. Генераторные запуски не выполнялись.
