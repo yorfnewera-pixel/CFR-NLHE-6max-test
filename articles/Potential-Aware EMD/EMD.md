@@ -242,3 +242,15 @@ assignment. При общем лимите 50 траектория стабил�
 исправлена подпись objective: `0.033152026` — до последнего update,
 `0.032806550` — после него. Полная сводка:
 `web_reports/potential-emd-turn-iteration-budget-20261103.md`.
+
+## Контроль ranks=5, K=20 с отдельным turn-бюджетом
+
+Дата: 2026-11-03. Ровно один launcher-контроль с `ranks=5`, `K=20`, общим
+`iterations=10` и `turn_iterations=50` завершился с реальным exit code `0` и
+status `complete`; `summary.json` подтвердил явный turn override. Turn
+стабилизировался за 17 итераций и финально согласован: нулевая доля смены,
+objective `0.032710700`. После согласованного пересчёта flop также согласован:
+6 итераций, нулевая доля и objective `0.024325738`. River hash совпал с
+прежним turn=10 контролем; turn и flop hashes ожидаемо изменились из-за
+пересчёта зависимого контура. Полная сводка:
+`web_reports/potential-emd-r5-k20-turn50-control-20261103.md`.
