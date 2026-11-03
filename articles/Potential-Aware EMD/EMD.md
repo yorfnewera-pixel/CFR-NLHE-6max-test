@@ -341,6 +341,19 @@ seed, общим `iterations=10`, `turn_iterations=50`, двумя потока�
 менялись. Полная сводка:
 `web_reports/potential-emd-r6-k20-flop-trajectory-probe-20261103.md`.
 
+### Отдельный production-бюджет flop
+
+Добавлен opt-in `--flop-iterations N` и параметр launcher
+`-FlopIterations N`. Без override flop наследует общий `--iterations`, как
+раньше; явный override меняет только flop и не влияет на river или turn.
+`summary.json` записывает effective `flop_iterations` и
+`flop_iterations_explicit`. Override допустим только с
+`--abstraction potential`; нулевые и нечисловые значения CLI отклоняются.
+
+Алгоритм, метрика, порог ранней остановки, seed и финальная диагностика не
+менялись. Генератор и тяжёлые probe в этой задаче не запускались; production
+контроль с flop budget 30 требует отдельного согласования.
+
 ### Continuation checkpoint-20: согласованность на шаге 24
 
 Из `checkpoint-20.bin` выполнен ровно один test-only continuation с максимумом

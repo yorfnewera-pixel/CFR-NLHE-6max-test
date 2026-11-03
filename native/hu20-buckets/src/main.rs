@@ -1,4 +1,4 @@
-//! hu20-buckets build --out DIR [--ranks 13] [--ks 50,200] [--bins 50] [--seed 1] [--iterations 100] [--turn-iterations N] [--diagnose-final-assignments] [--profile-flop-emd]
+//! hu20-buckets build --out DIR [--ranks 13] [--ks 50,200] [--bins 50] [--seed 1] [--iterations 100] [--turn-iterations N] [--flop-iterations N] [--diagnose-final-assignments] [--profile-flop-emd]
 //! hu20-buckets key HOLE BOARD     e.g. key "Ah Kh" "2h 7c 9d"
 use hu20_buckets::*;
 use std::fs;
@@ -24,27 +24,39 @@ fn arg(args: &[String], name: &str, default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
-fn iteration_limits(args: &[String]) -> (usize, usize, bool) {
-    let iterations: usize = arg(args, "--iterations", "100").parse().unwrap();
-    let turn_iterations = args
-        .iter()
-        .position(|argument| argument == "--turn-iterations")
+fn positive_iteration_override(args: &[String], name: &str) -> Option<usize> {
+    args.iter()
+        .position(|argument| argument == name)
         .map(|index| {
-            args.get(index + 1)
-                .expect("--turn-iterations requires a value")
-                .parse()
-                .expect("--turn-iterations must be a positive integer")
-        });
-    match turn_iterations {
-        Some(turn_iterations) => {
-            assert!(
-                turn_iterations > 0,
-                "--turn-iterations must be a positive integer"
-            );
-            (iterations, turn_iterations, true)
-        }
-        None => (iterations, iterations, false),
-    }
+            let value = args
+                .get(index + 1)
+                .unwrap_or_else(|| panic!("{name} requires a value"));
+            let iterations = value
+                .parse::<usize>()
+                .unwrap_or_else(|_| panic!("{name} must be a positive integer"));
+            assert!(iterations > 0, "{name} must be a positive integer");
+            iterations
+        })
+}
+
+fn iteration_limits(args: &[String]) -> (usize, usize, usize, bool, bool) {
+    let iterations: usize = arg(args, "--iterations", "100").parse().unwrap();
+    let turn_iterations = positive_iteration_override(args, "--turn-iterations");
+    let flop_iterations = positive_iteration_override(args, "--flop-iterations");
+    (
+        iterations,
+        turn_iterations.unwrap_or(iterations),
+        flop_iterations.unwrap_or(iterations),
+        turn_iterations.is_some(),
+        flop_iterations.is_some(),
+    )
+}
+
+fn validate_flop_iterations_abstraction(abstraction: &str, flop_iterations_explicit: bool) {
+    assert!(
+        abstraction == "potential" || !flop_iterations_explicit,
+        "--flop-iterations requires --abstraction potential"
+    );
 }
 
 fn cards(text: &str) -> Vec<u8> {
@@ -138,7 +150,13 @@ fn build(args: &[String]) {
     let ranks: u8 = arg(args, "--ranks", "13").parse().unwrap();
     let bins: usize = arg(args, "--bins", "50").parse().unwrap();
     let seed: u64 = arg(args, "--seed", "202610050003").parse().unwrap();
-    let (iterations, turn_iterations, turn_iterations_explicit) = iteration_limits(args);
+    let (
+        iterations,
+        turn_iterations,
+        flop_iterations,
+        turn_iterations_explicit,
+        flop_iterations_explicit,
+    ) = iteration_limits(args);
     let ks: Vec<usize> = arg(args, "--ks", "50,200")
         .split(',')
         .map(|k| k.parse().unwrap())
@@ -152,6 +170,7 @@ fn build(args: &[String]) {
         matches!(abstraction.as_str(), "equity" | "potential"),
         "--abstraction must be equity or potential"
     );
+    validate_flop_iterations_abstraction(&abstraction, flop_iterations_explicit);
     fs::create_dir_all(&out).unwrap();
     let log = Log {
         started: Instant::now(),
@@ -159,7 +178,7 @@ fn build(args: &[String]) {
     };
     let deck = deck(ranks);
     let mut summary = vec![format!(
-        "\"format\": \"{}\", \"ranks\": {ranks}, \"deck_cards\": {}, \"bins\": {bins}, \"seed\": {seed}, \"ks\": {ks:?}, \"iterations\": {iterations}, \"turn_iterations\": {turn_iterations}, \"turn_iterations_explicit\": {turn_iterations_explicit}, \"threads\": {}, \"code_revision\": \"{}\", \"working_tree_dirty\": {}",
+        "\"format\": \"{}\", \"ranks\": {ranks}, \"deck_cards\": {}, \"bins\": {bins}, \"seed\": {seed}, \"ks\": {ks:?}, \"iterations\": {iterations}, \"turn_iterations\": {turn_iterations}, \"turn_iterations_explicit\": {turn_iterations_explicit}, \"flop_iterations\": {flop_iterations}, \"flop_iterations_explicit\": {flop_iterations_explicit}, \"threads\": {}, \"code_revision\": \"{}\", \"working_tree_dirty\": {}",
         if abstraction == "potential" { "hu20-potential-aware-emd-v1" } else { "hu20-equity-buckets-v1" }, deck.len(), rayon::current_num_threads(), code_revision(), working_tree_is_dirty())];
 
     log.stage("river-equity", "computing");
@@ -276,7 +295,7 @@ fn build(args: &[String]) {
                 &turn_ground,
                 k,
                 seed,
-                iterations,
+                flop_iterations,
                 Some(flop_progress),
                 diagnose_final_assignments,
                 profile_flop_emd,
@@ -448,7 +467,7 @@ mod tests {
             "10".to_owned(),
         ];
 
-        assert_eq!(iteration_limits(&args), (10, 10, false));
+        assert_eq!(iteration_limits(&args), (10, 10, 10, false, false));
     }
 
     #[test]
@@ -462,7 +481,81 @@ mod tests {
             "50".to_owned(),
         ];
 
-        assert_eq!(iteration_limits(&args), (10, 50, true));
+        assert_eq!(iteration_limits(&args), (10, 50, 10, true, false));
+    }
+
+    #[test]
+    fn iteration_limits_preserve_flop_default_without_override() {
+        let args = vec![
+            "hu20-buckets".to_owned(),
+            "build".to_owned(),
+            "--iterations".to_owned(),
+            "10".to_owned(),
+            "--turn-iterations".to_owned(),
+            "50".to_owned(),
+        ];
+
+        assert_eq!(iteration_limits(&args), (10, 50, 10, true, false));
+    }
+
+    #[test]
+    fn iteration_limits_apply_flop_override_without_changing_river_or_turn() {
+        let args = vec![
+            "hu20-buckets".to_owned(),
+            "build".to_owned(),
+            "--iterations".to_owned(),
+            "10".to_owned(),
+            "--turn-iterations".to_owned(),
+            "50".to_owned(),
+            "--flop-iterations".to_owned(),
+            "30".to_owned(),
+        ];
+
+        assert_eq!(iteration_limits(&args), (10, 50, 30, true, true));
+    }
+
+    #[test]
+    #[should_panic(expected = "--flop-iterations must be a positive integer")]
+    fn iteration_limits_reject_zero_flop_override() {
+        let args = vec![
+            "hu20-buckets".to_owned(),
+            "build".to_owned(),
+            "--flop-iterations".to_owned(),
+            "0".to_owned(),
+        ];
+
+        iteration_limits(&args);
+    }
+
+    #[test]
+    #[should_panic(expected = "--flop-iterations must be a positive integer")]
+    fn iteration_limits_reject_non_numeric_flop_override() {
+        let args = vec![
+            "hu20-buckets".to_owned(),
+            "build".to_owned(),
+            "--flop-iterations".to_owned(),
+            "many".to_owned(),
+        ];
+
+        iteration_limits(&args);
+    }
+
+    #[test]
+    #[should_panic(expected = "--flop-iterations requires a value")]
+    fn iteration_limits_reject_missing_flop_override_value() {
+        let args = vec![
+            "hu20-buckets".to_owned(),
+            "build".to_owned(),
+            "--flop-iterations".to_owned(),
+        ];
+
+        iteration_limits(&args);
+    }
+
+    #[test]
+    #[should_panic(expected = "--flop-iterations requires --abstraction potential")]
+    fn flop_override_rejects_equity_abstraction() {
+        validate_flop_iterations_abstraction("equity", true);
     }
 
     #[test]

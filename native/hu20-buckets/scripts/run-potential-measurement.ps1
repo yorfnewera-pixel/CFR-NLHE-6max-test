@@ -6,6 +6,8 @@ param(
     [ValidateRange(1, 100000)] [int] $Iterations = 10,
     # Ноль означает отсутствие override: turn наследует общий лимит.
     [ValidateRange(0, 100000)] [int] $TurnIterations = 0,
+    # Ноль означает отсутствие override: flop наследует общий лимит.
+    [ValidateRange(0, 100000)] [int] $FlopIterations = 0,
     [ValidateRange(1, 64)] [int] $Threads = 2,
     [ValidateRange(1, 86400)] [int] $TimeoutSeconds = 3600,
     [UInt64] $Seed = 202610050003,
@@ -44,6 +46,9 @@ try {
     $arguments = @('build', '--out', $output, '--ranks', $Ranks, '--ks', $K, '--iterations', $Iterations, '--seed', $Seed, '--abstraction', 'potential')
     if ($TurnIterations -gt 0) {
         $arguments += '--turn-iterations', $TurnIterations
+    }
+    if ($FlopIterations -gt 0) {
+        $arguments += '--flop-iterations', $FlopIterations
     }
     if ($DiagnoseFinalAssignments) {
         $arguments += '--diagnose-final-assignments'
