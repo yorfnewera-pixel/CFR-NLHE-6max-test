@@ -133,3 +133,26 @@ turn-входов: воспроизвести траекторию до шага
 replay, continuation шагов 29–50 и создание новых checkpoint не выполнялись.
 Ни production-код, ни его правило остановки не менялись; процессов генератора
 или probe после проверки не запускалось.
+
+## Один test-only river+turn probe с новой исходной точкой
+
+После уточнения контракта выполнен ровно один supervised release-probe в новом
+пустом каталоге
+`native/hu20-buckets/results/test-only-r7-turn-k10-step28-continuation-20261103`
+с общим timeout `300 с`, двумя Rayon-потоками и без flop или production-таблиц.
+Перед ним успешно собрана release test-конфигурация. Probe завершился с
+`exit_code=101` через `25,26 с`; supervisor завершился штатно, timeout не
+сработал, процессов `cargo` и `hu20-buckets` не осталось.
+
+Continuation не начался: первая проверка префикса отвергла step 1. Сохранённый
+production objective равен `0.09387810753124796`, а `TestOnlyEmdStepper`
+получил `0.09387810729668342`. Сравнение было точным, без нового допуска;
+checkpoint, trace-метрики и финальная диагностика шага 28 не создавались.
+
+Причина расхождения ограничена test-only путём: production turn использует
+`kmeans_wasserstein_1d_with_diagnostics`, тогда как текущий
+`TestOnlyEmdStepper` рассчитывает assignment через общий EMD-kernel. Поэтому
+этот запуск не является побитовым восстановлением исходного контроля и не
+даёт новой исходной точки шага 28. Production-метрика, update, tie-breaking,
+допуски, остановка и таблицы не менялись. Повтор и альтернативный probe не
+выполнялись.

@@ -1,0 +1,11 @@
+warn: could not canonicalize path C:\Users\Cassmall
+    Finished `release` profile [optimized] target(s) in 0.02s
+     Running unittests src\lib.rs (target\release\deps\hu20_buckets-ccff93ae03ea823a.exe)
+potential-features board_size=4: 260862/260862, elapsed_seconds=0.5
+
+thread 'tests::test_only_ranks7_turn_k10_continues_after_verified_step_28' (6228) panicked at src\lib.rs:4717:13:
+assertion `left == right` failed: turn objective mismatch at iteration 1
+  left: 0.09387810729668342
+ right: 0.09387810753124796
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `--lib`

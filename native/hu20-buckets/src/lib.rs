@@ -2931,7 +2931,20 @@ mod tests {
         }
 
         fn step(&mut self) -> Result<Option<TestOnlyEmdIteration>, EmdContextError> {
-            if self.stabilized {
+            self.step_impl(true)
+        }
+
+        fn step_without_early_stop(
+            &mut self,
+        ) -> Result<Option<TestOnlyEmdIteration>, EmdContextError> {
+            self.step_impl(false)
+        }
+
+        fn step_impl(
+            &mut self,
+            stop_on_early_stabilization: bool,
+        ) -> Result<Option<TestOnlyEmdIteration>, EmdContextError> {
+            if stop_on_early_stabilization && self.stabilized {
                 return Ok(None);
             }
             let n = self.weight.len();
@@ -3023,7 +3036,8 @@ mod tests {
                 moved_weight_fraction: moved / total,
                 occupied_buckets: mass.iter().filter(|&&value| value > 0.0).count(),
             };
-            self.stabilized = diagnostic.moved_weight_fraction < 1e-4;
+            self.stabilized =
+                stop_on_early_stabilization && diagnostic.moved_weight_fraction < 1e-4;
             self.diagnostics.push(diagnostic.clone());
             Ok(Some(diagnostic))
         }
@@ -3081,6 +3095,22 @@ mod tests {
                 .chain([(self.rng.0 >> 32) as u32, self.rng.0 as u32])
                 .collect()
         }
+    }
+
+    #[test]
+    fn test_only_stepper_can_continue_past_early_stop() {
+        let points = [1.0f32, 0.0, 0.0, 1.0];
+        let weight = [1u64, 1];
+        let ground = [0.0f32, 1.0, 1.0, 0.0];
+        let mut stepper = TestOnlyEmdStepper::new(&points, 2, &weight, &ground, 1, 7);
+        stepper.stabilized = true;
+
+        let diagnostic = stepper
+            .step_without_early_stop()
+            .expect("valid test-only continuation");
+
+        assert!(diagnostic.is_some());
+        assert!(!stepper.stabilized);
     }
 
     fn test_only_state_fingerprint(words: &[u32]) -> u64 {
@@ -4602,6 +4632,181 @@ mod tests {
         for row in flop.distribution.chunks_exact(4) {
             assert!((row.iter().sum::<f32>() - 1.0).abs() < 1e-6, "{row:?}");
         }
+    }
+
+    /// Один согласованный test-only probe продолжает turn после нового
+    /// проверяемого checkpoint шага 28 для `ranks=7, K=10`.
+    #[test]
+    #[ignore = "ручной test-only continuation turn ranks=7; запускать с --ignored --nocapture под общим timeout 300 с"]
+    fn test_only_ranks7_turn_k10_continues_after_verified_step_28() {
+        use std::io::Write;
+
+        const K: usize = 10;
+        const SEED: u64 = 202_610_050_003;
+        const CONTROL_TURN_OBJECTIVES: [f64; 28] = [
+            0.093_878_107_531_247_96,
+            0.069_619_094_619_986_57,
+            0.066_461_444_756_355,
+            0.065_835_569_059_757_3,
+            0.064_993_761_144_054_38,
+            0.064_219_256_308_054_95,
+            0.063_890_307_745_594_61,
+            0.063_956_841_499_195_64,
+            0.063_920_528_245_297_27,
+            0.063_861_846_133_701_18,
+            0.063_772_262_941_226,
+            0.063_619_773_161_908_26,
+            0.063_557_347_155_343_34,
+            0.063_541_175_612_322_13,
+            0.063_443_046_939_590_09,
+            0.063_327_102_121_507_26,
+            0.063_217_400_356_864_03,
+            0.063_063_193_480_681_87,
+            0.062_966_368_040_303_13,
+            0.062_887_448_183_352_66,
+            0.062_763_998_038_317_99,
+            0.062_641_214_205_662_13,
+            0.062_617_736_939_631_93,
+            0.062_619_913_559_020_3,
+            0.062_627_927_249_839_41,
+            0.062_623_934_115_557_54,
+            0.062_617_296_211_079_56,
+            0.062_618_406_466_629_56,
+        ];
+        let trace_path = std::path::PathBuf::from(
+            std::env::var("HU20_R7_TURN_PROBE_TRACE_PATH")
+                .expect("HU20_R7_TURN_PROBE_TRACE_PATH is required"),
+        );
+        let checkpoint_directory = std::path::PathBuf::from(
+            std::env::var("HU20_R7_TURN_PROBE_CHECKPOINT_DIR")
+                .expect("HU20_R7_TURN_PROBE_CHECKPOINT_DIR is required"),
+        );
+        assert!(
+            checkpoint_directory.is_dir(),
+            "checkpoint directory must exist"
+        );
+        assert!(
+            std::fs::read_dir(&checkpoint_directory)
+                .expect("read checkpoint directory")
+                .next()
+                .is_none(),
+            "checkpoint directory must be empty"
+        );
+        assert!(!trace_path.exists(), "trace path must be new");
+        let mut trace = std::fs::File::create(trace_path).expect("create turn trace");
+
+        let deck = deck(7);
+        let river = RiverTable::build(&deck);
+        let river_clusters = kmeans(&river.equity, 1, &river.weight, K, SEED, 10);
+        let mut river_ground = vec![0.0; K * K];
+        for left in 0..K {
+            for right in 0..K {
+                river_ground[left * K + right] =
+                    (river_clusters.centroids[left] - river_clusters.centroids[right]).abs();
+            }
+        }
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, K);
+        let mut stepper =
+            TestOnlyEmdStepper::new(&turn.distribution, K, &turn.weight, &river_ground, K, SEED);
+        let mut seen = std::collections::HashMap::new();
+        for iteration in 1..=28 {
+            let diagnostic = stepper
+                .step()
+                .expect("valid production-order prefix step")
+                .expect("prefix must return a diagnostic");
+            assert_eq!(
+                stepper.objective[iteration - 1],
+                CONTROL_TURN_OBJECTIVES[iteration - 1],
+                "turn objective mismatch at iteration {iteration}"
+            );
+            assert_eq!(
+                test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic),
+                None,
+                "prefix repeated a complete algorithmic state"
+            );
+        }
+        assert!(
+            stepper.stabilized,
+            "step 28 must hit the historical early threshold"
+        );
+        assert_eq!(stepper.objective, CONTROL_TURN_OBJECTIVES);
+        let state_before_diagnostic = stepper.state_words();
+        let step_28_diagnostic = stepper
+            .final_assignment_diagnostic()
+            .expect("valid step-28 final reassignment");
+        assert_eq!(state_before_diagnostic, stepper.state_words());
+        assert_eq!(
+            format!("{:.9}", step_28_diagnostic.changed_weight_fraction),
+            "0.000019111"
+        );
+        assert_eq!(
+            format!("{:.9}", step_28_diagnostic.objective),
+            "0.062617997"
+        );
+        writeln!(
+            trace,
+            "final iteration=28 objective={:.17} changed_weight_fraction={:.17}",
+            step_28_diagnostic.objective, step_28_diagnostic.changed_weight_fraction,
+        )
+        .expect("write step-28 final diagnostic");
+        trace.flush().expect("flush step-28 final diagnostic");
+        test_only_write_checkpoint(&checkpoint_directory, 28, &stepper);
+        let resumed = test_only_resume_from_checkpoint(
+            &checkpoint_directory.join("checkpoint-28.bin"),
+            &turn.distribution,
+            K,
+            &turn.weight,
+            &river_ground,
+            K,
+        )
+        .expect("load verified new step-28 checkpoint");
+        assert_eq!(resumed.state_words(), stepper.state_words());
+        assert_eq!(resumed.objective, stepper.objective);
+
+        let mut terminal_reason = "budget";
+        for iteration in 29..=50 {
+            let diagnostic = stepper
+                .step_without_early_stop()
+                .expect("valid test-only continuation step")
+                .expect("test-only continuation must not stop early");
+            test_only_write_checkpoint(&checkpoint_directory, iteration, &stepper);
+            let state_before_diagnostic = stepper.state_words();
+            let final_diagnostic = stepper
+                .final_assignment_diagnostic()
+                .expect("valid continuation final reassignment");
+            assert_eq!(state_before_diagnostic, stepper.state_words());
+            writeln!(
+                trace,
+                "final iteration={iteration} objective={:.17} changed_weight_fraction={:.17}",
+                final_diagnostic.objective, final_diagnostic.changed_weight_fraction,
+            )
+            .expect("write continuation final diagnostic");
+            trace.flush().expect("flush continuation final diagnostic");
+            if let Some((first_seen_at, repeated_at)) =
+                test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic)
+            {
+                terminal_reason = "repeated-state";
+                writeln!(trace, "terminal reason={terminal_reason} first={first_seen_at} repeated={repeated_at}")
+                    .expect("write repeated state");
+                break;
+            }
+            if final_diagnostic.changed_weight_fraction == 0.0 {
+                terminal_reason = "zero-final-assignment-change";
+                writeln!(
+                    trace,
+                    "terminal reason={terminal_reason} iteration={iteration}"
+                )
+                .expect("write zero diagnostic");
+                break;
+            }
+        }
+        writeln!(
+            trace,
+            "complete iterations={} terminal_reason={terminal_reason}",
+            stepper.diagnostics.len(),
+        )
+        .expect("write probe completion");
+        trace.flush().expect("flush probe completion");
     }
 
     /// Одноразовый test-only probe для контроля `ranks=5, K=20`.

@@ -1,0 +1,11 @@
+
+running 1 test
+test tests::test_only_ranks7_turn_k10_continues_after_verified_step_28 ... FAILED
+
+failures:
+
+failures:
+    tests::test_only_ranks7_turn_k10_continues_after_verified_step_28
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 62 filtered out; finished in 25.26s
+

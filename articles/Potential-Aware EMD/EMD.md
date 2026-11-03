@@ -386,6 +386,22 @@ continuation и новые checkpoint не выполнялись; production-к
 Подробности:
 `web_reports/potential-emd-r7-k10-turn50-flop30-seed-202610050003-control-20261103.md`.
 
+### Test-only replay turn ranks=7: префикс не совпал на первой итерации
+
+После изменения контракта выполнен ровно один release test-only river+turn
+probe с общим timeout `300 с`, двумя потоками, без flop и production-таблиц.
+Он остановился на первой обязательной сверке: сохранённый неокруглённый
+turn objective шага 1 — `0.09387810753124796`, значение stepper —
+`0.09387810729668342`. Допуск не расширялся; continuation, checkpoint шага 28
+и повтор не выполнялись. Exit code probe — `101`, timeout не сработал,
+оставшихся процессов нет.
+
+Расхождение связано с тем, что production turn использует 1D Wasserstein
+путь, а имеющийся `TestOnlyEmdStepper` — общий EMD-kernel. Следовательно,
+новая проверяемая исходная точка шага 28 не создана, а строгая согласованность
+turn остаётся открытым вопросом. Полный протокол и логи:
+`web_reports/potential-emd-r7-k10-turn50-flop30-seed-202610050003-control-20261103.md`.
+
 ### Диагностика причин остановки ranks=7, K=10
 
 По сохранённому `stderr.log` и `summary.json` установлено: turn дошёл до
