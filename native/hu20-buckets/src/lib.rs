@@ -6836,6 +6836,55 @@ mod tests {
     }
 
     #[test]
+    fn turn_budget_exhaustion_can_return_consistent_final_assignments() {
+        let points = vec![1.0, 0.0, 1.0, 0.0];
+        let weight = vec![1, 1];
+        let coordinates = vec![0.0, 1.0];
+
+        let result =
+            kmeans_wasserstein_1d_with_diagnostics(&points, &weight, &coordinates, 2, 5, 1, false);
+
+        assert!(matches!(
+            result.termination,
+            Some(ClusteringTermination::IterationBudgetExhausted)
+        ));
+        assert!(result.final_assignment_consistent);
+        assert!(result.final_assignment_diagnostic.is_none());
+    }
+
+    #[test]
+    fn turn_final_assignment_diagnostic_does_not_mutate_input_state() {
+        let sorted_points = vec![1.0f32, 0.0, 0.0, 1.0];
+        let weight = vec![3, 2];
+        let sorted_coordinates = vec![0.0f32, 1.0];
+        let centroids = vec![1.0f32, 0.0, 0.0, 1.0];
+        let assignment = vec![0, 1];
+        let centroids_before: Vec<u32> = centroids.iter().map(|value| value.to_bits()).collect();
+        let assignment_before = assignment.clone();
+
+        let diagnostic = wasserstein_1d_final_assignment_diagnostic(
+            &sorted_points,
+            2,
+            &weight,
+            &sorted_coordinates,
+            &centroids,
+            2,
+            &assignment,
+        );
+
+        assert_eq!(assignment, assignment_before);
+        assert_eq!(
+            centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            centroids_before
+        );
+        assert_eq!(diagnostic.changed_weight_fraction, 0.0);
+        assert_eq!(diagnostic.objective, 0.0);
+    }
+
+    #[test]
     fn turn_termination_gate_does_not_mutate_state_or_require_optional_diagnostic() {
         let (points, weight, coordinates) = turn_termination_fixture();
         let without_output =
