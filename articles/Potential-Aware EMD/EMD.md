@@ -642,6 +642,7 @@ objectives, финальная диагностика и checkpoint не пол�
 выполнялся. Это ошибка runner, не вывод о production Wasserstein. Детали:
 `web_reports/potential-emd-r7-k10-turn-replay-only-20261103.md`.
 
+
 После отдельного согласования manifest path был исправлен на абсолютный, но
 вторая разрешённая попытка также остановилась до ignored-test: multi-line
 вывод discovery ошибочно проверялся через PowerShell `-notmatch` для массива
@@ -675,4 +676,23 @@ Runner теперь использует один полный `tests::...` libt
 test через exact `--list` при нулевых build/discovery exit codes и штатно
 остановился до replay. Новый вычислительный запуск не выполнялся и требует
 отдельного согласования. Детали:
+`web_reports/potential-emd-r7-k10-turn-replay-only-20261103.md`.
+
+### Replay-only turn R7/K10: шаг 28 подтверждён
+
+После отдельного разрешения выполнен ровно один release replay-only запуск
+`ranks=7`, `K=10`, seed `202610050003`, с двумя Rayon-потоками и общим
+timeout `300 с`. Release build и exact discovery завершились с кодом `0`;
+discovery и actual run выбрали ровно один полный
+`tests::test_only_ranks7_turn_k10_replays_verified_step_28_only`. Тест
+прошёл за `2.26 с`: все 28 objectives строго совпали с контролем, шаг 28
+достиг исторической ранней остановки, а немутирующая финальная диагностика
+дала objective `0.06261799722102224` и changed weight fraction
+`0.00001911132345915`.
+
+Созданный `checkpoint-28.bin` успешно восстановил точное состояние; SHA-256:
+`94251D3D492741A62D1E38216F4C472597BAF6A4F12FDE71FB203C9AB3B213FC`.
+Commit перед запуском: `f4a9723d00afd7a20617433ad60cc4e94b2895d9`; дерево
+было чистым. Continuation 29–50, flop и production-таблицы не запускались,
+оставшихся процессов нет. Детали:
 `web_reports/potential-emd-r7-k10-turn-replay-only-20261103.md`.

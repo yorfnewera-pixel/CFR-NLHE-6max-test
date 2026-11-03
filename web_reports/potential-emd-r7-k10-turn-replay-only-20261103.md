@@ -183,3 +183,45 @@ tests::test_only_ranks7_turn_k10_replays_verified_step_28_only: test
 
 Replay не запускался; trace, checkpoint и SHA-256 отсутствуют, процессов
 `hu20-buckets` нет. Нужна новая отдельная авторизация вычислительной попытки.
+
+## Единственный вычислительный replay-only запуск до шага 28
+
+После отдельного разрешения выполнен ровно один запуск в новом пустом каталоге
+`native/hu20-buckets/results/test-only-r7-turn-k10-replay-only-execution-20261103`:
+
+```powershell
+pwsh -NoProfile -File .\native\hu20-buckets\scripts\run-r7-turn-replay-only.ps1 -OutputDirectory .\native\hu20-buckets\results\test-only-r7-turn-k10-replay-only-execution-20261103 -TimeoutSeconds 300
+```
+
+До вычислений runner повторно собрал release test-бинарник и выполнил exact
+discovery той же командой выбора. Оба кода завершения равны `0`; discovery
+содержит ровно один тест:
+
+```text
+tests::test_only_ranks7_turn_k10_replays_verified_step_28_only: test
+
+1 test, 0 benchmarks
+```
+
+Commit до сборки и перед запуском: `f4a9723d00afd7a20617433ad60cc4e94b2895d9`.
+Рабочее дерево до запуска было чистым; после него содержит только новый
+локальный каталог результатов. Параметры: `ranks=7`, `K=10`, seed
+`202610050003`, два Rayon-потока, river budget `10`, turn limit `28`,
+`continuation=false`, `flop=false`, `production_tables=false`; общий timeout
+`300 с`. Запуск начался в `2026-11-03T14:55:07.8609950Z`, длился `2.26 с`
+по libtest и завершился с фактическим `exit_code=0` без timeout. Выполнен
+ровно один тест: `1 passed; 0 failed; 0 ignored; 66 filtered out`.
+
+Все gates пройдены: все 28 turn objectives строго совпали с сохранённым
+контролем; на шаге 28 достигнут исторический порог ранней остановки
+`0.000053087 < 0.0001`; финальная диагностика не изменила state. Её новые
+неокруглённые значения: objective `0.06261799722102224`, changed weight
+fraction `0.00001911132345915`. Trace завершён строкой
+`complete iterations=28 terminal_reason=replay-only-step-28`.
+
+Создан `checkpoint-28.bin`; он успешно загружен обратно с точным сравнением
+state и objective. SHA-256 checkpoint:
+`94251D3D492741A62D1E38216F4C472597BAF6A4F12FDE71FB203C9AB3B213FC`.
+После завершения процессов `hu20-buckets` не осталось. Continuation 29–50,
+flop и production-таблицы не запускались. Следующее решение о continuation
+должно быть отдельным.

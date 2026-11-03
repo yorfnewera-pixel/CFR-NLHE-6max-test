@@ -1,0 +1,30 @@
+iteration=1 objective_before=0.093878108 objective_after=0.075023278 moved_weight_fraction=1.000000000 occupied_buckets=10 state_fingerprint=BA31BA9C64CB6DDF
+iteration=2 objective_before=0.069619095 objective_after=0.067368678 moved_weight_fraction=0.229320663 occupied_buckets=10 state_fingerprint=F4D687E88BE03692
+iteration=3 objective_before=0.066461445 objective_after=0.066452608 moved_weight_fraction=0.102710269 occupied_buckets=10 state_fingerprint=92C81C000810EF40
+iteration=4 objective_before=0.065835569 objective_after=0.065391468 moved_weight_fraction=0.093096565 occupied_buckets=10 state_fingerprint=2C543D32C7ABE2B7
+iteration=5 objective_before=0.064993761 objective_after=0.064570109 moved_weight_fraction=0.076514307 occupied_buckets=10 state_fingerprint=0B5698E95BE0880D
+iteration=6 objective_before=0.064219256 objective_after=0.064058927 moved_weight_fraction=0.057720090 occupied_buckets=10 state_fingerprint=A052266C42FADC5C
+iteration=7 objective_before=0.063890308 objective_after=0.064029707 moved_weight_fraction=0.045274017 occupied_buckets=10 state_fingerprint=8FEA455707D5DB53
+iteration=8 objective_before=0.063956841 objective_after=0.064000771 moved_weight_fraction=0.033592044 occupied_buckets=10 state_fingerprint=4BF1355AB5C77B42
+iteration=9 objective_before=0.063920528 objective_after=0.063954703 moved_weight_fraction=0.034534869 occupied_buckets=10 state_fingerprint=EB6E4C494B5F04A6
+iteration=10 objective_before=0.063861846 objective_after=0.063854257 moved_weight_fraction=0.032154448 occupied_buckets=10 state_fingerprint=8161291FE1505942
+iteration=11 objective_before=0.063772263 objective_after=0.063676557 moved_weight_fraction=0.028806427 occupied_buckets=10 state_fingerprint=B8FC1E141934C0F2
+iteration=12 objective_before=0.063619773 objective_after=0.063597985 moved_weight_fraction=0.019871529 occupied_buckets=10 state_fingerprint=0380B1AC54AFE287
+iteration=13 objective_before=0.063557347 objective_after=0.063584504 moved_weight_fraction=0.021123675 occupied_buckets=10 state_fingerprint=698F19F75FE406D9
+iteration=14 objective_before=0.063541176 objective_after=0.063491885 moved_weight_fraction=0.023261312 occupied_buckets=10 state_fingerprint=1C3BB5731D3ECD95
+iteration=15 objective_before=0.063443047 objective_after=0.063362415 moved_weight_fraction=0.019156624 occupied_buckets=10 state_fingerprint=1A93E2901C32F3BB
+iteration=16 objective_before=0.063327102 objective_after=0.063248653 moved_weight_fraction=0.018065863 occupied_buckets=10 state_fingerprint=53FE8BF1F7D7AE02
+iteration=17 objective_before=0.063217400 objective_after=0.063096766 moved_weight_fraction=0.022312116 occupied_buckets=10 state_fingerprint=0119068E28F7268B
+iteration=18 objective_before=0.063063193 objective_after=0.062984527 moved_weight_fraction=0.015358426 occupied_buckets=10 state_fingerprint=2AD2867002EC75D6
+iteration=19 objective_before=0.062966368 objective_after=0.062895479 moved_weight_fraction=0.014668295 occupied_buckets=10 state_fingerprint=098DD3A6577DBF7A
+iteration=20 objective_before=0.062887448 objective_after=0.062775787 moved_weight_fraction=0.010088655 occupied_buckets=10 state_fingerprint=708A79719F85C254
+iteration=21 objective_before=0.062763998 objective_after=0.062653345 moved_weight_fraction=0.011027234 occupied_buckets=10 state_fingerprint=39BEF92D7F62AAF2
+iteration=22 objective_before=0.062641214 objective_after=0.062626737 moved_weight_fraction=0.009250588 occupied_buckets=10 state_fingerprint=AF3D2B63A42E74FC
+iteration=23 objective_before=0.062617737 objective_after=0.062624909 moved_weight_fraction=0.007633204 occupied_buckets=10 state_fingerprint=A9157281903CD996
+iteration=24 objective_before=0.062619914 objective_after=0.062630676 moved_weight_fraction=0.006382474 occupied_buckets=10 state_fingerprint=2049DDC683B5720E
+iteration=25 objective_before=0.062627927 objective_after=0.062625845 moved_weight_fraction=0.005333475 occupied_buckets=10 state_fingerprint=CF3B2CE183F4CAF9
+iteration=26 objective_before=0.062623934 objective_after=0.062617588 moved_weight_fraction=0.003025960 occupied_buckets=10 state_fingerprint=FB2A05102D7EF818
+iteration=27 objective_before=0.062617296 objective_after=0.062618408 moved_weight_fraction=0.001170038 occupied_buckets=10 state_fingerprint=EAC7F10439816806
+iteration=28 objective_before=0.062618406 objective_after=0.062617997 moved_weight_fraction=0.000053087 occupied_buckets=10 state_fingerprint=C7645CFCC29D564E
+final iteration=28 objective=0.06261799722102224 changed_weight_fraction=0.00001911132345915
+complete iterations=28 terminal_reason=replay-only-step-28
