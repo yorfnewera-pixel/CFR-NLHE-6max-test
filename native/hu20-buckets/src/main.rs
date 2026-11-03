@@ -248,6 +248,15 @@ fn build(args: &[String]) {
             if let Some(diagnostic) = &turn_clusters.final_assignment_diagnostic {
                 log.stage("turn-clustering", &format!("k={k}, final_assignment_diagnostic=true, changed_weight_fraction={:.9}, objective={:.9}", diagnostic.changed_weight_fraction, diagnostic.objective));
             }
+            if let Some(termination) = turn_clusters.termination {
+                log.stage(
+                    "turn-clustering",
+                    &format!(
+                        "k={k}, termination={termination:?}, final_assignment_consistent={}",
+                        turn_clusters.final_assignment_consistent
+                    ),
+                );
+            }
             log.stage("turn-clustering", &format!("end k={k}"));
             log.stage("write-turn-table", &format!("start k={k}"));
             write_table(
