@@ -341,6 +341,18 @@ seed, общим `iterations=10`, `turn_iterations=50`, двумя потока�
 менялись. Полная сводка:
 `web_reports/potential-emd-r6-k20-flop-trajectory-probe-20261103.md`.
 
+### Повтор с checkpoint
+
+Ровно один новый stateful test-only release-probe с теми же параметрами и
+timeout `300 с` снова дошёл до шага 18; шаги 11–18 численно совпали с прежним
+trace, но побитовое совпадение со старым state не заявляется, поскольку старый
+trace не содержит state. После каждого update сохранён атомарный checkpoint;
+timeout остановил дерево процесса до шагов 19–20 и финальной диагностики.
+Последний `checkpoint-18.bin` прошёл загрузку без EMD-проходов: параметры и
+отпечаток точных входов совпали, SHA-256 сохранён локально. Производственный
+код и таблицы не менялись. Детали:
+`web_reports/potential-emd-r6-k20-flop-trajectory-probe-20261103.md`.
+
 ### Stateful continuation того же probe
 
 После test-only stepper и проверки Windows Job Object выполнен ровно один

@@ -2799,6 +2799,22 @@ mod tests {
             ground: &[f32],
             k: usize,
         ) -> Result<TestOnlyEmdStepperSnapshot, String> {
+            Self::load_verified(
+                path,
+                dim,
+                weight.len(),
+                k,
+                test_only_input_fingerprint(points, dim, weight, ground, k),
+            )
+        }
+
+        fn load_verified(
+            path: &std::path::Path,
+            dim: usize,
+            point_count: usize,
+            k: usize,
+            expected_input_fingerprint: u64,
+        ) -> Result<TestOnlyEmdStepperSnapshot, String> {
             let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
             let mut offset = 0usize;
             let magic = Self::read_bytes(&bytes, &mut offset, 8)?;
@@ -2816,10 +2832,10 @@ mod tests {
                 1 => true,
                 _ => return Err("некорректный флаг стабилизации checkpoint".to_owned()),
             };
-            if checkpoint_dim != dim || checkpoint_k != k || checkpoint_n != weight.len() {
+            if checkpoint_dim != dim || checkpoint_k != k || checkpoint_n != point_count {
                 return Err("checkpoint несовместим с размерностями или K".to_owned());
             }
-            if checkpoint_input != test_only_input_fingerprint(points, dim, weight, ground, k) {
+            if checkpoint_input != expected_input_fingerprint {
                 return Err("checkpoint несовместим с точными входами".to_owned());
             }
             let assignment = Self::read_u16s(&bytes, &mut offset)?;
@@ -2985,6 +3001,40 @@ mod tests {
             path.display()
         );
         TestOnlyEmdCheckpoint::write_atomic(&path, stepper).expect("write atomic step checkpoint");
+    }
+
+    fn test_only_load_trace_metrics(
+        path: &std::path::Path,
+    ) -> Result<std::collections::HashMap<usize, (f64, f64, f64)>, String> {
+        let trace = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let mut result = std::collections::HashMap::new();
+        for line in trace.lines().filter(|line| line.starts_with("iteration=")) {
+            let fields = line
+                .split_whitespace()
+                .filter_map(|field| field.split_once('='))
+                .collect::<std::collections::HashMap<_, _>>();
+            let parse = |name| {
+                fields
+                    .get(name)
+                    .ok_or_else(|| format!("trace lacks {name}"))?
+                    .parse::<f64>()
+                    .map_err(|error| error.to_string())
+            };
+            let iteration = fields
+                .get("iteration")
+                .ok_or_else(|| "trace lacks iteration".to_owned())?
+                .parse::<usize>()
+                .map_err(|error| error.to_string())?;
+            let metrics = (
+                parse("objective_before")?,
+                parse("objective_after")?,
+                parse("moved_weight_fraction")?,
+            );
+            if result.insert(iteration, metrics).is_some() {
+                return Err(format!("duplicate trace iteration {iteration}"));
+            }
+        }
+        Ok(result)
     }
 
     #[derive(Debug)]
@@ -4222,6 +4272,17 @@ mod tests {
                 .is_none(),
             "checkpoint directory must be empty"
         );
+        let previous_metrics = test_only_load_trace_metrics(&std::path::PathBuf::from(
+            std::env::var("HU20_FLOP_PREVIOUS_TRACE_PATH")
+                .expect("HU20_FLOP_PREVIOUS_TRACE_PATH is required for the test-only probe"),
+        ))
+        .expect("load previous flop trajectory trace");
+        for iteration in 11..=18 {
+            assert!(
+                previous_metrics.contains_key(&iteration),
+                "previous trace lacks iteration {iteration}"
+            );
+        }
         let mut trace = std::fs::File::create(trace_path).expect("create flop probe trace");
         let deck = deck(6);
         let river = RiverTable::build(&deck);
@@ -4290,6 +4351,17 @@ mod tests {
                 break;
             };
             test_only_write_checkpoint(&checkpoint_directory, iteration, &stepper);
+            if let Some(&(objective_before, objective_after, moved_weight_fraction)) =
+                previous_metrics.get(&iteration)
+            {
+                assert!(
+                    (diagnostic.objective_before_update - objective_before).abs() <= 5e-10
+                        && (diagnostic.objective_after_update - objective_after).abs() <= 5e-10
+                        && (diagnostic.moved_weight_fraction - moved_weight_fraction).abs()
+                            <= 5e-10,
+                    "previous trace metrics differ at iteration {iteration}"
+                );
+            }
             repeated_state =
                 test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic);
             if repeated_state.is_some() {
@@ -4452,6 +4524,38 @@ mod tests {
                 .is_err()
         );
         std::fs::remove_file(path).expect("remove checkpoint");
+    }
+
+    #[test]
+    fn test_only_trace_parser_reads_iteration_metrics() {
+        let path =
+            std::env::temp_dir().join(format!("hu20-test-only-trace-{}.log", std::process::id()));
+        std::fs::write(
+            &path,
+            "iteration=11 objective_before=0.043054945 objective_after=0.043071678 moved_weight_fraction=0.005881799 occupied_buckets=20 state_fingerprint=ABC\n",
+        )
+        .expect("write trace fixture");
+        let parsed = test_only_load_trace_metrics(&path).expect("parse trace fixture");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[&11], (0.043054945, 0.043071678, 0.005881799));
+        std::fs::remove_file(path).expect("remove trace fixture");
+    }
+
+    #[test]
+    #[ignore = "ручная проверка сохранённого checkpoint без EMD-проходов"]
+    fn test_only_load_saved_flop_checkpoint_without_emd() {
+        let path = std::path::PathBuf::from(
+            std::env::var("HU20_FLOP_CHECKPOINT_PATH")
+                .expect("HU20_FLOP_CHECKPOINT_PATH is required"),
+        );
+        let checkpoint =
+            TestOnlyEmdCheckpoint::load_verified(&path, 20, 21_150, 20, 0xDF7E_8949_91B2_639B)
+                .expect("load compatible saved checkpoint");
+        assert_eq!(checkpoint.diagnostics.len(), 18);
+        assert_eq!(checkpoint.assignment.len(), 21_150);
+        assert_eq!(checkpoint.centroids.len(), 400);
+        assert_eq!(checkpoint.objective.len(), 18);
+        assert!(!checkpoint.stabilized);
     }
 
     #[test]
