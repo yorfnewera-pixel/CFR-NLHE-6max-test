@@ -630,3 +630,14 @@ ground matrix. На шаге 11 зафиксирован рост objective по
 центров относительно EMD, не доказательство ошибки решателя. Дорогой запуск
 не выполнялся. Детали:
 `web_reports/potential-emd-r6-k20-flop-trajectory-probe-20261103.md`.
+
+### Replay-only turn R7/K10: остановлен до теста
+
+Подготовлен отдельный test-only Wasserstein replay только до шага 28: он не
+содержит continuation 29–50, flop и production-таблицы. Единственная
+согласованная попытка после успешной release-сборки остановилась с exit code
+`101` до запуска ignored-test: supervised Cargo унаследовал корень
+репозитория вместо `native/hu20-buckets` и не нашёл `Cargo.toml`. Поэтому
+objectives, финальная диагностика и checkpoint не получены, повтор не
+выполнялся. Это ошибка runner, не вывод о production Wasserstein. Детали:
+`web_reports/potential-emd-r7-k10-turn-replay-only-20261103.md`.

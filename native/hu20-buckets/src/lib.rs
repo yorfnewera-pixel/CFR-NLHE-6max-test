@@ -2168,6 +2168,8 @@ pub fn centroid_emd_matrix_profiled(
 mod tests {
     use super::*;
 
+    const TEST_ONLY_R7_TURN_REPLAY_LIMIT: usize = 28;
+
     fn cards(text: &str) -> Vec<u8> {
         text.split_whitespace().map(parse_card).collect()
     }
@@ -5130,11 +5132,11 @@ mod tests {
         }
     }
 
-    /// Один согласованный test-only probe продолжает turn после нового
-    /// проверяемого checkpoint шага 28 для `ranks=7, K=10`.
+    /// Один согласованный test-only replay turn только до проверяемого
+    /// checkpoint шага 28 для `ranks=7, K=10`.
     #[test]
-    #[ignore = "ручной test-only continuation turn ranks=7; запускать с --ignored --nocapture под общим timeout 300 с"]
-    fn test_only_ranks7_turn_k10_continues_after_verified_step_28() {
+    #[ignore = "ручной test-only replay turn до шага 28; запускать с --ignored --nocapture под общим timeout 300 с"]
+    fn test_only_ranks7_turn_k10_replays_verified_step_28_only() {
         use std::io::Write;
 
         const K: usize = 10;
@@ -5203,7 +5205,7 @@ mod tests {
             SEED,
         );
         let mut seen = std::collections::HashMap::new();
-        for iteration in 1..=28 {
+        for iteration in 1..=TEST_ONLY_R7_TURN_REPLAY_LIMIT {
             let diagnostic = stepper.step().expect("prefix must return a diagnostic");
             assert_eq!(
                 stepper.objective[iteration - 1],
@@ -5257,47 +5259,9 @@ mod tests {
         assert_eq!(resumed.state_words(), stepper.state_words());
         assert_eq!(resumed.objective, stepper.objective);
 
-        let mut terminal_reason = "budget";
-        for iteration in 29..=50 {
-            let diagnostic = stepper
-                .step_without_early_stop()
-                .expect("test-only continuation must not stop early");
-            test_only_write_wasserstein_checkpoint(&checkpoint_directory, iteration, &stepper);
-            let state_before_diagnostic = stepper.state_words();
-            let final_diagnostic = stepper.final_assignment_diagnostic();
-            assert_eq!(state_before_diagnostic, stepper.state_words());
-            writeln!(
-                trace,
-                "final iteration={iteration} objective={:.17} changed_weight_fraction={:.17}",
-                final_diagnostic.objective, final_diagnostic.changed_weight_fraction,
-            )
-            .expect("write continuation final diagnostic");
-            trace.flush().expect("flush continuation final diagnostic");
-            if let Some((first_seen_at, repeated_at)) = test_only_wasserstein_record_step(
-                &mut trace,
-                &mut seen,
-                iteration,
-                &stepper,
-                &diagnostic,
-            ) {
-                terminal_reason = "repeated-state";
-                writeln!(trace, "terminal reason={terminal_reason} first={first_seen_at} repeated={repeated_at}")
-                    .expect("write repeated state");
-                break;
-            }
-            if final_diagnostic.changed_weight_fraction == 0.0 {
-                terminal_reason = "zero-final-assignment-change";
-                writeln!(
-                    trace,
-                    "terminal reason={terminal_reason} iteration={iteration}"
-                )
-                .expect("write zero diagnostic");
-                break;
-            }
-        }
         writeln!(
             trace,
-            "complete iterations={} terminal_reason={terminal_reason}",
+            "complete iterations={} terminal_reason=replay-only-step-28",
             stepper.diagnostics.len(),
         )
         .expect("write probe completion");
@@ -5998,6 +5962,12 @@ mod tests {
 
         assert!(stepper.step_without_early_stop().is_some());
         assert!(!stepper.stabilized);
+    }
+
+    #[test]
+    fn test_only_ranks7_replay_limit_excludes_continuation() {
+        assert_eq!(TEST_ONLY_R7_TURN_REPLAY_LIMIT, 28);
+        assert!(TEST_ONLY_R7_TURN_REPLAY_LIMIT < 29);
     }
 
     #[test]
