@@ -1,0 +1,5 @@
+Проект: CFR-NLHE-6max-main, основной Python-проект для покерных солверов и play API (`src/`, `tests/`). Для задачи potential-aware EMD используется отдельный Rust crate `native/hu20-buckets` (Rust 2021, dependency rayon 1.10), генерирующий river/turn/flop таблицы абстракции.
+
+Структура relevant: `native/hu20-buckets/src/lib.rs` содержит EMD, 1D Wasserstein и кластеризацию, включая test-only stepper/checkpoint в test module; `src/main.rs` — CLI production build; `scripts/run-potential-measurement.ps1` — контролируемый ручной launcher; `articles/Potential-Aware EMD/EMD.md` — технический журнал и ограничения.
+
+Критическое ограничение из EMD.md/README: тяжёлые generator runs не выполняются без отдельного согласования. Test-only код не должен менять production metric, центр-обновление, tie-breaking, thresholds, launcher или таблицы.
