@@ -1319,6 +1319,52 @@ enum EmdAssignmentSelection {
     VecReference,
 }
 
+#[derive(Clone, Copy)]
+enum EmdKernel {
+    Scratch,
+    #[cfg(test)]
+    PreScratchReference,
+}
+
+fn emd_with_context_for_kernel(
+    kernel: EmdKernel,
+    phase: &'static str,
+    point_index: usize,
+    centroid_index: usize,
+    left: &[f32],
+    right: &[f32],
+    ground: &[f32],
+    dimension: usize,
+    scratch: &mut EmdScratch,
+) -> Result<f32, EmdContextError> {
+    match kernel {
+        EmdKernel::Scratch => emd_with_context_with_scratch(
+            phase,
+            point_index,
+            centroid_index,
+            left,
+            right,
+            ground,
+            dimension,
+            scratch,
+        ),
+        #[cfg(test)]
+        EmdKernel::PreScratchReference => {
+            try_emd_pre_scratch_reference(left, right, ground, dimension).map_err(|source| {
+                EmdContextError {
+                    phase,
+                    point_index,
+                    centroid_index,
+                    left: left.to_vec(),
+                    right: right.to_vec(),
+                    ground: ground.to_vec(),
+                    source,
+                }
+            })
+        }
+    }
+}
+
 /// Weighted k-means under L1 between rows (earth mover's distance for CDFs),
 /// with k-means++ seeding on a weighted sample and mean centroid updates.
 pub fn kmeans(
@@ -1532,6 +1578,7 @@ pub fn kmeans_emd_profiled(
         diagnose_final_assignment,
         profile_enabled,
         EmdAssignmentSelection::Streaming,
+        EmdKernel::Scratch,
     )
 }
 
@@ -1547,6 +1594,7 @@ fn kmeans_emd_profiled_with_assignment(
     diagnose_final_assignment: bool,
     profile_enabled: bool,
     assignment_selection: EmdAssignmentSelection,
+    emd_kernel: EmdKernel,
 ) -> Result<ProfiledEmdClustering, EmdContextError> {
     let clustering_started = profile_enabled.then(Instant::now);
     let n = weight.len();
@@ -1580,7 +1628,8 @@ fn kmeans_emd_profiled_with_assignment(
                 let candidates = (0..k).map(|cluster| {
                     let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
                     emd_calls += 1;
-                    emd_with_context_with_scratch(
+                    emd_with_context_for_kernel(
+                        emd_kernel,
                         "assignment",
                         index,
                         cluster,
@@ -1663,7 +1712,8 @@ fn kmeans_emd_profiled_with_assignment(
         let objective_after_update_entries = (0..n)
             .map(|index| {
                 let cluster = assignment[index] as usize;
-                emd_with_context_with_scratch(
+                emd_with_context_for_kernel(
+                    emd_kernel,
                     "objective-after-update",
                     index,
                     cluster,
@@ -1735,7 +1785,8 @@ fn kmeans_emd_profiled_with_assignment(
                         .map(|cluster| {
                             let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
                             emd_calls += 1;
-                            emd_with_context_with_scratch(
+                            emd_with_context_for_kernel(
+                                emd_kernel,
                                 "final-assignment-diagnostic",
                                 index,
                                 cluster,
@@ -1830,6 +1881,35 @@ fn kmeans_emd_with_reference_assignment(
         diagnose_final_assignment,
         false,
         EmdAssignmentSelection::VecReference,
+        EmdKernel::Scratch,
+    )?
+    .clustering)
+}
+
+#[cfg(test)]
+fn kmeans_emd_with_pre_scratch_reference(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    ground: &[f32],
+    k: usize,
+    seed: u64,
+    max_iterations: usize,
+    diagnose_final_assignment: bool,
+) -> Result<Clustering, EmdContextError> {
+    Ok(kmeans_emd_profiled_with_assignment(
+        points,
+        dim,
+        weight,
+        ground,
+        k,
+        seed,
+        max_iterations,
+        None,
+        diagnose_final_assignment,
+        false,
+        EmdAssignmentSelection::Streaming,
+        EmdKernel::PreScratchReference,
     )?
     .clustering)
 }
@@ -5608,6 +5688,88 @@ mod tests {
             expected.changed_weight_fraction.to_bits()
         );
         assert_eq!(actual.objective.to_bits(), expected.objective.to_bits());
+    }
+
+    #[test]
+    fn scratch_clustering_matches_pre_scratch_reference_with_one_and_two_rayon_threads() {
+        let points = vec![
+            0.5, 0.3, 0.2, 0.1, 0.6, 0.3, 0.2, 0.1, 0.7, 0.4, 0.4, 0.2, 0.3, 0.3, 0.4,
+        ];
+        let weight = vec![2, 3, 5, 7, 11];
+        let ground = vec![0.0, 1.0, 2.0, 1.0, 0.0, 1.0, 2.0, 1.0, 0.0];
+        let reference =
+            kmeans_emd_with_pre_scratch_reference(&points, 3, &weight, &ground, 3, 17, 4, true)
+                .expect("valid pre-scratch reference clustering");
+        for threads in [1, 2] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("test pool");
+            let actual = pool
+                .install(|| {
+                    kmeans_emd_with_diagnostics(&points, 3, &weight, &ground, 3, 17, 4, None, true)
+                })
+                .expect("valid scratch clustering");
+            assert_eq!(actual.assignment, reference.assignment);
+            assert_eq!(actual.objective.len(), reference.objective.len());
+            assert_eq!(actual.diagnostics.len(), reference.diagnostics.len());
+            assert_eq!(
+                actual
+                    .centroids
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect::<Vec<_>>(),
+                reference
+                    .centroids
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                actual
+                    .objective
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect::<Vec<_>>(),
+                reference
+                    .objective
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect::<Vec<_>>()
+            );
+            for (actual, expected) in actual.diagnostics.iter().zip(&reference.diagnostics) {
+                assert_eq!(
+                    actual.objective_before_update.to_bits(),
+                    expected.objective_before_update.to_bits()
+                );
+                assert_eq!(
+                    actual.objective_after_update.to_bits(),
+                    expected.objective_after_update.to_bits()
+                );
+                assert_eq!(
+                    actual.objective_after_reassignment.map(f64::to_bits),
+                    expected.objective_after_reassignment.map(f64::to_bits)
+                );
+                assert_eq!(
+                    actual.moved_weight_fraction.to_bits(),
+                    expected.moved_weight_fraction.to_bits()
+                );
+                assert_eq!(actual.occupied_buckets, expected.occupied_buckets);
+            }
+            let actual = actual
+                .final_assignment_diagnostic
+                .as_ref()
+                .expect("scratch diagnostic");
+            let expected = reference
+                .final_assignment_diagnostic
+                .as_ref()
+                .expect("reference diagnostic");
+            assert_eq!(
+                actual.changed_weight_fraction.to_bits(),
+                expected.changed_weight_fraction.to_bits()
+            );
+            assert_eq!(actual.objective.to_bits(), expected.objective.to_bits());
+        }
     }
 
     #[test]
