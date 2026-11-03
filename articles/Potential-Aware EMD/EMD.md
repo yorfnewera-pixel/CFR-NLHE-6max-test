@@ -843,3 +843,15 @@ production `summary.json` `10/50/50` подтвердила: objectives flop 31�
 round-trip f64; округлённый CLI-лог не использовался. Это не является
 доказательством побитового равенства полного состояния. Детали:
 `web_reports/potential-emd-r7-k10-flop-objective-bits-offline-audit-20261103.md`.
+
+### Production repro R7/K10 `10/50/50`
+
+Ровно один repro исходного production-контроля на чистом дереве и commit
+`9f21d7c` завершился с `exit_code=0` и `status=complete`. Вычислительный код
+относительно исходного `d53e51a` не изменён. Полные objectives river (10),
+turn (29) и flop (40) побитово совпали с исходным контролем; turn и flop
+завершились как `EarlyStopConsistent` с численно нулевой final сменой.
+SHA-256 river, turn и flop также совпали. Время и память сохранены как
+измерение реального PID и не используются как критерий воспроизводимости.
+Детали:
+`web_reports/potential-emd-r7-k10-turn50-flop50-repro-20261103.md`.
