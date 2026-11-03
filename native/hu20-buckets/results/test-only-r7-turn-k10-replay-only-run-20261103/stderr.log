@@ -1,0 +1,4 @@
+warn: could not canonicalize path C:\Users\Cassmall
+    Finished `release` profile [optimized] target(s) in 0.03s
+     Running unittests src\lib.rs (native\hu20-buckets\target\release\deps\hu20_buckets-ccff93ae03ea823a.exe)
+     Running unittests src\main.rs (native\hu20-buckets\target\release\deps\hu20_buckets-ca57c12fb0347399.exe)

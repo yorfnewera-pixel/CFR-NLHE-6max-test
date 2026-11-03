@@ -112,3 +112,35 @@ tests::test_only_ranks7_turn_k10_replays_verified_step_28_only: test
 и checkpoint не созданы, процессов `hu20-buckets` нет. HEAD:
 `5aaec75a53397193c5cc0370c5fc75f0ca617a58`. Новый вычислительный запуск
 требует отдельного согласования.
+
+## Вычислительная попытка: Cargo выполнил ноль тестов
+
+После успешного `-VerifyOnly` была разрешена ровно одна вычислительная
+replay-only попытка:
+
+```powershell
+pwsh -NoProfile -File .\native\hu20-buckets\scripts\run-r7-turn-replay-only.ps1 -OutputDirectory .\native\hu20-buckets\results\test-only-r7-turn-k10-replay-only-run-20261103 -TimeoutSeconds 300
+```
+
+Release build и discovery вновь имели код `0`, а supervisor записал
+`exit_code=0` и не достиг timeout. Однако stdout Cargo содержит:
+
+```text
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 67 filtered out
+```
+
+`--exact` получил короткое имя
+`test_only_ranks7_turn_k10_replays_verified_step_28_only`, тогда как
+discovery возвращает полное `tests::test_only_ranks7_turn_k10_replays_verified_step_28_only`.
+Следовательно, exact filter не выбрал ignored-test. Это infrastructure/filter
+failure: river/turn вычисления не стартовали, gates не выполнялись,
+`turn-trace.log`, checkpoint и SHA-256 отсутствуют. Внешний memory monitor
+также не успел присоединиться к уже завершившемуся процессу; это следствие
+нулевого test-run, а не timeout.
+
+HEAD на момент попытки: `9d0dcc3a883a4562d0c2dca6749c051cd2ebc3ae`. Процессов
+`hu20-buckets` не осталось. По условию автоматический повтор и альтернативный
+probe не выполнялись. До нового решения runner должен хранить полное libtest
+имя и его малая проверка должна дополнительно доказывать, что exact command
+выбирает ровно один test, а не ноль.
