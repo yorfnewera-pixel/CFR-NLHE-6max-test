@@ -25,10 +25,11 @@ diagnostics. Release discovery выбрал ровно один test
 
 ## Траектория
 
-Обычная смена назначений пересекла ранний порог на шаге 39
-(`0.00001221001221001`), но test-only continuation продолжался до явной
-границы 50. Немутирующая final-assignment диагностика стала IEEE-754 signed
-zero на шаге 40:
+На шаге 39 final-assignment диагностика ещё дала
+`0.00001221001221001`, тогда как ordinary moved fraction стала ниже порога
+только на шаге 40 (`0.00001221001221001`). Test-only continuation всё равно
+продолжался до явной границы 50. Немутирующая final-assignment диагностика
+стала IEEE-754 signed zero на шаге 40:
 
 | Шаг | Objective до / после update | Ordinary moved | Final changed |
 | ---: | --- | ---: | ---: |

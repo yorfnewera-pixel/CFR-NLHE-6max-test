@@ -788,10 +788,23 @@ gate-control. Атомарный `checkpoint-30.bin` содержит точны
 проверенного checkpoint-30 на commit
 `1f8d730fb875f857107df711e47067d8a1bf9762`. River/turn и flop 1–30 не
 пересчитывались, production-таблицы и шаг 51 не запускались. На шаге 39
-обычная смена назначений пересекла прежний early-stop порог, но test-only
-прогон продолжился до явной границы 50. Final changed fraction стал signed
+ordinary moved ещё равен `0.00048026048026048`; значение
+`0.00001221001221001` относится к ordinary moved шага 40, а на шаге 39 это
+final changed fraction. Test-only прогон продолжился до явной границы 50.
+Final changed fraction стал signed
 zero на шаге 40; state words точно повторились на переходе `40→41` и далее
 не менялись. Checkpoint записан после каждого шага 31–50. Рост objective
 после update наблюдался на шагах 31–34 и 36–37, без вывода об ошибке
 решателя. Детали:
 `web_reports/potential-emd-r7-k10-flop-step30-continuation-20261103.md`.
+
+### Inspection production flop gate R7/K10
+
+Статическая проверка установила, что gate финальной согласованности пока
+применён только к Wasserstein-1D turn. Production flop использует generic
+`kmeans_emd_profiled_with_assignment()`, который выходит по ordinary moved
+fraction до opt-in final diagnostic; при ненулевой final changed fraction
+такая остановка была бы преждевременной. Поэтому production-контроль с
+budgets `10/50/50` не запускался. Предложены минимальный production-patch и
+регрессии, без изменения метрики, центров, tie-breaking, допусков или seed.
+Детали: `web_reports/potential-emd-r7-k10-flop-production-gate-inspection-20261103.md`.
