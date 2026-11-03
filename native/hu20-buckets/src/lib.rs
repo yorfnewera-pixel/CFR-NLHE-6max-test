@@ -5297,6 +5297,9 @@ mod tests {
 
         const K: usize = 10;
         const SEED: u64 = 202_610_050_003;
+        const EXPECTED_CHECKPOINT_OBJECTIVE_BITS: u64 = 0x3FB0_07C2_87E6_DCF2;
+        const EXPECTED_FINAL_OBJECTIVE_BITS: u64 = 0x3FB0_07BB_AA34_8F28;
+        const EXPECTED_FINAL_CHANGED_WEIGHT_FRACTION_BITS: u64 = 0x3EF4_0A28_25D9_2ED3;
         let checkpoint_path = std::path::PathBuf::from(
             std::env::var("HU20_R7_TURN_CONTINUATION_CHECKPOINT_PATH")
                 .expect("HU20_R7_TURN_CONTINUATION_CHECKPOINT_PATH is required"),
@@ -5331,6 +5334,18 @@ mod tests {
         let state_before_diagnostic = stepper.state_words();
         let diagnostic = stepper.final_assignment_diagnostic();
         assert_eq!(state_before_diagnostic, stepper.state_words());
+        assert_eq!(
+            checkpoint_objective.to_bits(),
+            EXPECTED_CHECKPOINT_OBJECTIVE_BITS
+        );
+        assert_eq!(
+            diagnostic.objective.to_bits(),
+            EXPECTED_FINAL_OBJECTIVE_BITS
+        );
+        assert_eq!(
+            diagnostic.changed_weight_fraction.to_bits(),
+            EXPECTED_FINAL_CHANGED_WEIGHT_FRACTION_BITS
+        );
 
         let mut trace = std::fs::File::create(trace_path).expect("create inspection trace");
         writeln!(
@@ -5364,8 +5379,8 @@ mod tests {
 
         const K: usize = 10;
         const SEED: u64 = 202_610_050_003;
-        const EXPECTED_STEP_28_OBJECTIVE: f64 = 0.062_617_997_221_022_24;
-        const EXPECTED_STEP_28_CHANGED_WEIGHT_FRACTION: f64 = 0.000_019_111_323_459_15;
+        const EXPECTED_STEP_28_OBJECTIVE_BITS: u64 = 0x3FB0_07BB_AA34_8F28;
+        const EXPECTED_STEP_28_CHANGED_WEIGHT_FRACTION_BITS: u64 = 0x3EF4_0A28_25D9_2ED3;
 
         let checkpoint_path = std::path::PathBuf::from(
             std::env::var("HU20_R7_TURN_CONTINUATION_CHECKPOINT_PATH")
@@ -5411,10 +5426,13 @@ mod tests {
         let state_before_initial_diagnostic = stepper.state_words();
         let initial_diagnostic = stepper.final_assignment_diagnostic();
         assert_eq!(state_before_initial_diagnostic, stepper.state_words());
-        assert_eq!(initial_diagnostic.objective, EXPECTED_STEP_28_OBJECTIVE);
         assert_eq!(
-            initial_diagnostic.changed_weight_fraction,
-            EXPECTED_STEP_28_CHANGED_WEIGHT_FRACTION
+            initial_diagnostic.objective.to_bits(),
+            EXPECTED_STEP_28_OBJECTIVE_BITS
+        );
+        assert_eq!(
+            initial_diagnostic.changed_weight_fraction.to_bits(),
+            EXPECTED_STEP_28_CHANGED_WEIGHT_FRACTION_BITS
         );
         writeln!(
             trace,
