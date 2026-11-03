@@ -6,7 +6,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'process-supervision.ps1')
+. (Join-Path $PSScriptRoot 'r7-turn-replay-only-command.ps1')
 $project = Split-Path -Parent $PSScriptRoot
+$cargoCommand = Get-R7TurnReplayCargoCommand -ManifestPath (Join-Path $project 'Cargo.toml')
 $output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) {
     if ((Get-ChildItem -LiteralPath $output -Force | Measure-Object).Count -ne 0) {
@@ -31,13 +33,21 @@ $context = Join-Path $output 'launcher-context.txt'
     "continuation=false"
     "flop=false"
     "production_tables=false"
-    "test=test_only_ranks7_turn_k10_replays_verified_step_28_only"
+    "manifest_path=$($cargoCommand.ManifestPath)"
+    "test=$($cargoCommand.TestName)"
+    "replay_arguments=$($cargoCommand.ReplayArguments)"
 ) | Set-Content -LiteralPath $context -Encoding utf8
 
 Push-Location $project
 try {
-    cargo test --release --no-run
+    & cargo.exe test --manifest-path $cargoCommand.ManifestPath --release --no-run
     if ($LASTEXITCODE -ne 0) { throw "Release test build failed with code $LASTEXITCODE." }
+    $discovery = & cargo.exe test --manifest-path $cargoCommand.ManifestPath --release $cargoCommand.TestName -- --list 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Replay test discovery failed with code $LASTEXITCODE." }
+    if ($discovery -notmatch [regex]::Escape($cargoCommand.TestName)) {
+        throw "Replay test discovery did not find $($cargoCommand.TestName)."
+    }
+    $discovery | Set-Content -LiteralPath (Join-Path $output 'test-discovery.log') -Encoding utf8
     $previousThreads = $env:RAYON_NUM_THREADS
     $previousTrace = $env:HU20_R7_TURN_PROBE_TRACE_PATH
     $previousCheckpoints = $env:HU20_R7_TURN_PROBE_CHECKPOINT_DIR
@@ -46,7 +56,7 @@ try {
     $env:HU20_R7_TURN_PROBE_CHECKPOINT_DIR = $checkpoints
     try {
         $exitCode = Invoke-SupervisedProcess -FilePath 'cargo.exe' `
-            -Arguments 'test --release test_only_ranks7_turn_k10_replays_verified_step_28_only -- --ignored --nocapture' `
+            -Arguments $cargoCommand.ReplayArguments `
             -TimeoutSeconds $TimeoutSeconds -ContextPath $context `
             -StdoutPath (Join-Path $output 'stdout.log') -StderrPath (Join-Path $output 'stderr.log') `
             -MemoryScriptPath (Join-Path $PSScriptRoot 'measure-process-memory.ps1') `

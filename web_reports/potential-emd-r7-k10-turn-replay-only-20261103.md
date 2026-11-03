@@ -48,3 +48,35 @@ replay-траектории. По правилу одного запуска п�
 не выполнялись. Перед любым новым согласованием нужно исправить runner,
 например передав Cargo явный `--manifest-path native/hu20-buckets/Cargo.toml`,
 проверить этот путь малым тестом и заново согласовать единственную попытку.
+
+## Вторая разрешённая попытка после исправления manifest path
+
+Абсолютный manifest path, точный test filter с `--release --ignored --exact`
+и малый PowerShell-тест были добавлены. Без выполнения replay discovery
+обнаружил нужный тест:
+
+```text
+tests::test_only_ranks7_turn_k10_replays_verified_step_28_only: test
+```
+
+Обычный Rust suite прошёл (`70` tests, `0` failures, `9` ignored). Затем
+была выполнена одна новая разрешённая команда с новым пустым каталогом:
+
+```powershell
+pwsh -NoProfile -File .\native\hu20-buckets\scripts\run-r7-turn-replay-only.ps1 -OutputDirectory .\native\hu20-buckets\results\test-only-r7-turn-k10-replay-only-fixed-runner-20261103 -TimeoutSeconds 300
+```
+
+Release test build завершился с кодом `0`, но runner остановился на
+внутреннем discovery до supervised процесса. Проверка использовала PowerShell
+`-notmatch` для массива строк: среди результата `--list` была нужная строка
+и служебные несовпадающие строки, поэтому условие ложно сработало. Это не
+ошибка Cargo, не timeout и не численный replay.
+
+Ignored-test не запускался: trace, stdout/stderr, checkpoint и его SHA-256
+отсутствуют; процессов `hu20-buckets` после остановки нет. HEAD на момент
+второй попытки: `0ffb1cee86cb91c09b842ae05daca001ee07dd7e`.
+
+По условию «при любой ошибке — без автоматического повтора» третья попытка
+не выполнялась. До нового отдельного согласования runner должен заменить
+проверку массива на булеву проверку наличия хотя бы одной совпавшей строки и
+получить малый тест для multi-line discovery-вывода.

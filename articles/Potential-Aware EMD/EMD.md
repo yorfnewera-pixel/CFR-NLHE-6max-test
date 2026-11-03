@@ -641,3 +641,10 @@ ground matrix. На шаге 11 зафиксирован рост objective по
 objectives, финальная диагностика и checkpoint не получены, повтор не
 выполнялся. Это ошибка runner, не вывод о production Wasserstein. Детали:
 `web_reports/potential-emd-r7-k10-turn-replay-only-20261103.md`.
+
+После отдельного согласования manifest path был исправлен на абсолютный, но
+вторая разрешённая попытка также остановилась до ignored-test: multi-line
+вывод discovery ошибочно проверялся через PowerShell `-notmatch` для массива
+строк. Это снова инфраструктурная ошибка runner; objectives, checkpoint и
+SHA-256 не получены, третья попытка не выполнялась. Отчёт дополнен тем же
+путём.
