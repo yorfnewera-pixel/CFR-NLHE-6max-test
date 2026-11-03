@@ -1281,6 +1281,10 @@ pub struct EmdIterationProfile {
 pub struct EmdClusteringProfile {
     pub wall_clock: Duration,
     pub iterations: Vec<EmdIterationProfile>,
+    /// Стоимость проверок final assignment, вызванных пороговым gate.
+    pub final_assignment_gate_wall_clock: Option<Duration>,
+    pub final_assignment_gate_emd_calls: Option<usize>,
+    /// Стоимость проверки окончательного состояния, если gate не оставил актуальный результат.
     pub final_assignment_diagnostic_wall_clock: Option<Duration>,
     pub final_assignment_diagnostic_emd_calls: Option<usize>,
 }
@@ -1294,6 +1298,73 @@ pub struct FinalAssignmentDiagnostic {
 
 fn is_final_assignment_consistent(changed_weight_fraction: f64) -> bool {
     changed_weight_fraction == 0.0
+}
+
+fn emd_final_assignment_diagnostic(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    ground: &[f32],
+    centroids: &[f32],
+    k: usize,
+    assignment: &[u16],
+    total: f64,
+    emd_kernel: EmdKernel,
+) -> Result<(FinalAssignmentDiagnostic, usize), EmdContextError> {
+    let reassigned: Vec<(u16, f32, usize)> = (0..weight.len())
+        .into_par_iter()
+        .map_init(EmdScratch::default, |scratch, index| {
+            let point = &points[index * dim..(index + 1) * dim];
+            let mut emd_calls = 0usize;
+            let distances: Result<Vec<(u16, f32)>, EmdContextError> = (0..k)
+                .map(|cluster| {
+                    let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
+                    emd_calls += 1;
+                    emd_with_context_for_kernel(
+                        emd_kernel,
+                        "final-assignment-diagnostic",
+                        index,
+                        cluster,
+                        point,
+                        centroid,
+                        ground,
+                        dim,
+                        scratch,
+                    )
+                    .map(|distance| (cluster as u16, distance))
+                })
+                .collect();
+            distances
+                .map(|distances| {
+                    distances
+                        .into_iter()
+                        .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
+                        .unwrap()
+                })
+                .map(|(cluster, distance)| (cluster, distance, emd_calls))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let changed_weight_fraction = reassigned
+        .iter()
+        .zip(assignment)
+        .zip(weight)
+        .filter(|((next, current), _)| next.0 != **current)
+        .map(|(_, &value)| value as f64)
+        .sum::<f64>()
+        / total;
+    let objective = reassigned
+        .iter()
+        .zip(weight)
+        .map(|(entry, &value)| entry.1 as f64 * value as f64)
+        .sum::<f64>()
+        / total;
+    Ok((
+        FinalAssignmentDiagnostic {
+            changed_weight_fraction,
+            objective,
+        },
+        reassigned.iter().map(|entry| entry.2).sum(),
+    ))
 }
 
 /// Состояние одной итерации EMD-кластеризации.
@@ -1631,7 +1702,14 @@ fn kmeans_emd_profiled_with_assignment(
     let mut objective = Vec::new();
     let mut diagnostics: Vec<ClusteringIteration> = Vec::new();
     let mut profile_iterations = Vec::new();
+    let mut gate_diagnostic = None;
+    let mut termination = None;
+    let mut gate_wall_clock = Duration::ZERO;
+    let mut gate_emd_calls = 0usize;
+    let mut gate_was_checked = false;
     for iteration in 1..=max_iterations {
+        // Назначения и центры будут изменены этой итерацией, поэтому прошлый gate не актуален.
+        gate_diagnostic = None;
         if let Some(callback) = &progress {
             callback(EmdProgressEvent::IterationStart { iteration });
         }
@@ -1788,75 +1866,53 @@ fn kmeans_emd_profiled_with_assignment(
             });
         }
         if moved / total < 1e-4 {
-            break;
+            let gate_started = profile_enabled.then(Instant::now);
+            let (diagnostic, emd_calls) = emd_final_assignment_diagnostic(
+                points,
+                dim,
+                weight,
+                ground,
+                &centroids,
+                k,
+                &assignment,
+                total,
+                emd_kernel,
+            )?;
+            if let Some(started) = gate_started {
+                gate_wall_clock += started.elapsed();
+                gate_emd_calls += emd_calls;
+                gate_was_checked = true;
+            }
+            gate_diagnostic = Some(diagnostic);
+            if is_final_assignment_consistent(diagnostic.changed_weight_fraction) {
+                termination = Some(ClusteringTermination::EarlyStopConsistent);
+                break;
+            }
         }
     }
     let final_assignment_started = profile_enabled.then(Instant::now);
-    let (final_assignment_diagnostic, final_assignment_diagnostic_profile) =
-        if diagnose_final_assignment {
-            let reassigned: Vec<(u16, f32, usize)> = (0..n)
-                .into_par_iter()
-                .map_init(EmdScratch::default, |scratch, index| {
-                    let point = row(index);
-                    let mut emd_calls = 0usize;
-                    let distances: Result<Vec<(u16, f32)>, EmdContextError> = (0..k)
-                        .map(|cluster| {
-                            let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
-                            emd_calls += 1;
-                            emd_with_context_for_kernel(
-                                emd_kernel,
-                                "final-assignment-diagnostic",
-                                index,
-                                cluster,
-                                point,
-                                centroid,
-                                ground,
-                                dim,
-                                scratch,
-                            )
-                            .map(|distance| (cluster as u16, distance))
-                        })
-                        .collect();
-                    distances
-                        .map(|distances| {
-                            distances
-                                .into_iter()
-                                .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
-                                .unwrap()
-                        })
-                        .map(|(cluster, distance)| (cluster, distance, emd_calls))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let changed_weight_fraction = reassigned
-                .iter()
-                .zip(&assignment)
-                .zip(weight)
-                .filter(|((next, current), _)| next.0 != **current)
-                .map(|(_, &value)| value as f64)
-                .sum::<f64>()
-                / total;
-            let objective = reassigned
-                .iter()
-                .zip(weight)
-                .map(|(entry, &value)| entry.1 as f64 * value as f64)
-                .sum::<f64>()
-                / total;
-            let profile = final_assignment_started.map(|started| {
-                (
-                    started.elapsed(),
-                    reassigned.iter().map(|entry| entry.2).sum(),
-                )
-            });
-            (
-                Some(FinalAssignmentDiagnostic {
-                    changed_weight_fraction,
-                    objective,
-                }),
-                profile,
-            )
+    let (final_gate_diagnostic, final_assignment_diagnostic_profile) =
+        if let Some(diagnostic) = gate_diagnostic {
+            (diagnostic, None)
         } else {
-            (None, None)
+            let (diagnostic, emd_calls) = emd_final_assignment_diagnostic(
+                points,
+                dim,
+                weight,
+                ground,
+                &centroids,
+                k,
+                &assignment,
+                total,
+                emd_kernel,
+            )?;
+            let profile = final_assignment_started.map(|started| (started.elapsed(), emd_calls));
+            (diagnostic, profile)
         };
+    let final_assignment_consistent =
+        is_final_assignment_consistent(final_gate_diagnostic.changed_weight_fraction);
+    let termination = termination.unwrap_or(ClusteringTermination::IterationBudgetExhausted);
+    let final_assignment_diagnostic = diagnose_final_assignment.then_some(final_gate_diagnostic);
     Ok(ProfiledEmdClustering {
         clustering: Clustering {
             assignment,
@@ -1864,12 +1920,14 @@ fn kmeans_emd_profiled_with_assignment(
             objective,
             diagnostics,
             final_assignment_diagnostic,
-            termination: None,
-            final_assignment_consistent: false,
+            termination: Some(termination),
+            final_assignment_consistent,
         },
         profile: clustering_started.map(|started| EmdClusteringProfile {
             wall_clock: started.elapsed(),
             iterations: profile_iterations,
+            final_assignment_gate_wall_clock: gate_was_checked.then_some(gate_wall_clock),
+            final_assignment_gate_emd_calls: gate_was_checked.then_some(gate_emd_calls),
             final_assignment_diagnostic_wall_clock: final_assignment_diagnostic_profile
                 .map(|profile| profile.0),
             final_assignment_diagnostic_emd_calls: final_assignment_diagnostic_profile
@@ -7297,6 +7355,160 @@ mod tests {
         assert!((0.0..=1.0).contains(&diagnostic.changed_weight_fraction));
     }
 
+    fn generic_emd_termination_fixture() -> (Vec<f32>, Vec<u64>, Vec<f32>) {
+        (
+            vec![1.0, 0.0, 0.75, 0.25, 0.5, 0.5, 0.25, 0.75, 0.0, 1.0],
+            vec![10_000, 1, 1, 1, 1],
+            vec![0.0, 1.0, 1.0, 0.0],
+        )
+    }
+
+    #[test]
+    fn generic_emd_termination_continues_after_nonzero_gate_reassignment() {
+        let (points, weight, ground) = generic_emd_termination_fixture();
+
+        let result =
+            kmeans_emd_with_diagnostics(&points, 2, &weight, &ground, 2, 5, 3, None, false)
+                .expect("valid EMD clustering");
+
+        assert_eq!(result.diagnostics.len(), 3);
+        assert!(matches!(
+            result.termination,
+            Some(ClusteringTermination::EarlyStopConsistent)
+        ));
+        assert!(result.final_assignment_consistent);
+        assert!(result.final_assignment_diagnostic.is_none());
+    }
+
+    #[test]
+    fn generic_emd_budget_exhaustion_reports_actual_final_consistency() {
+        let (points, weight, ground) = generic_emd_termination_fixture();
+        let inconsistent =
+            kmeans_emd_with_diagnostics(&points, 2, &weight, &ground, 2, 5, 2, None, false)
+                .expect("valid EMD clustering");
+        assert!(matches!(
+            inconsistent.termination,
+            Some(ClusteringTermination::IterationBudgetExhausted)
+        ));
+        assert!(!inconsistent.final_assignment_consistent);
+
+        let consistent = kmeans_emd_with_diagnostics(
+            &[1.0, 0.0, 1.0, 0.0],
+            2,
+            &[1, 1],
+            &[0.0, 1.0, 1.0, 0.0],
+            2,
+            5,
+            1,
+            None,
+            false,
+        )
+        .expect("valid EMD clustering");
+        assert!(matches!(
+            consistent.termination,
+            Some(ClusteringTermination::IterationBudgetExhausted)
+        ));
+        assert!(consistent.final_assignment_consistent);
+    }
+
+    #[test]
+    fn generic_emd_final_assignment_diagnostic_does_not_mutate_input_state() {
+        let points = vec![1.0f32, 0.0, 0.0, 1.0];
+        let weight = vec![3, 2];
+        let ground = vec![0.0f32, 1.0, 1.0, 0.0];
+        let centroids = vec![1.0f32, 0.0, 0.0, 1.0];
+        let assignment = vec![0, 1];
+        let centroids_before: Vec<u32> = centroids.iter().map(|value| value.to_bits()).collect();
+        let assignment_before = assignment.clone();
+
+        let (diagnostic, _) = emd_final_assignment_diagnostic(
+            &points,
+            2,
+            &weight,
+            &ground,
+            &centroids,
+            2,
+            &assignment,
+            5.0,
+            EmdKernel::Scratch,
+        )
+        .expect("valid final-assignment diagnostic");
+
+        assert_eq!(assignment, assignment_before);
+        assert_eq!(
+            centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            centroids_before
+        );
+        assert_eq!(diagnostic.changed_weight_fraction, 0.0);
+        assert_eq!(diagnostic.objective, 0.0);
+    }
+
+    #[test]
+    fn generic_emd_gate_is_independent_from_output_and_invalidates_stale_cache() {
+        let (points, weight, ground) = generic_emd_termination_fixture();
+        let without_output =
+            kmeans_emd_with_diagnostics(&points, 2, &weight, &ground, 2, 5, 3, None, false)
+                .expect("valid EMD clustering");
+        let with_output =
+            kmeans_emd_with_diagnostics(&points, 2, &weight, &ground, 2, 5, 3, None, true)
+                .expect("valid EMD clustering");
+        let profiled =
+            kmeans_emd_profiled(&points, 2, &weight, &ground, 2, 5, 3, None, false, true)
+                .expect("valid profiled EMD clustering");
+
+        assert_eq!(without_output.assignment, with_output.assignment);
+        assert_eq!(without_output.centroids, with_output.centroids);
+        assert_eq!(without_output.objective, with_output.objective);
+        assert_eq!(
+            without_output.diagnostics.len(),
+            with_output.diagnostics.len()
+        );
+        for (without, with) in without_output
+            .diagnostics
+            .iter()
+            .zip(&with_output.diagnostics)
+        {
+            assert_eq!(
+                without.objective_before_update.to_bits(),
+                with.objective_before_update.to_bits()
+            );
+            assert_eq!(
+                without.objective_after_update.to_bits(),
+                with.objective_after_update.to_bits()
+            );
+            assert_eq!(
+                without.objective_after_reassignment.map(f64::to_bits),
+                with.objective_after_reassignment.map(f64::to_bits)
+            );
+            assert_eq!(
+                without.moved_weight_fraction.to_bits(),
+                with.moved_weight_fraction.to_bits()
+            );
+            assert_eq!(without.occupied_buckets, with.occupied_buckets);
+        }
+        assert_eq!(without_output.termination, with_output.termination);
+        assert_eq!(
+            without_output.final_assignment_consistent,
+            with_output.final_assignment_consistent
+        );
+        assert!(without_output.final_assignment_diagnostic.is_none());
+        assert_eq!(
+            with_output
+                .final_assignment_diagnostic
+                .expect("requested output diagnostic")
+                .changed_weight_fraction,
+            0.0
+        );
+
+        let profile = profiled.profile.expect("requested EMD profile");
+        assert_eq!(profile.final_assignment_gate_emd_calls, Some(20));
+        assert!(profile.final_assignment_gate_wall_clock.is_some());
+        assert_eq!(profile.final_assignment_diagnostic_emd_calls, None);
+    }
+
     fn turn_termination_fixture() -> (Vec<f32>, Vec<u64>, Vec<f32>) {
         (
             vec![1.0, 0.0, 0.75, 0.25, 0.5, 0.5, 0.25, 0.75, 0.0, 1.0],
@@ -7445,7 +7657,8 @@ mod tests {
             assert_eq!(iteration.assignment_emd_calls, 8);
             assert_eq!(iteration.objective_after_update_emd_calls, 4);
         }
-        assert_eq!(profile.final_assignment_diagnostic_emd_calls, Some(8));
+        assert_eq!(profile.final_assignment_gate_emd_calls, Some(8));
+        assert_eq!(profile.final_assignment_diagnostic_emd_calls, None);
     }
 
     #[test]

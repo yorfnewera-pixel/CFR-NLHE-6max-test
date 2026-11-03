@@ -808,3 +808,16 @@ fraction до opt-in final diagnostic; при ненулевой final changed f
 budgets `10/50/50` не запускался. Предложены минимальный production-patch и
 регрессии, без изменения метрики, центров, tie-breaking, допусков или seed.
 Детали: `web_reports/potential-emd-r7-k10-flop-production-gate-inspection-20261103.md`.
+
+### Generic EMD final-assignment gate
+
+Согласованный минимальный production-патч перенёс final-assignment gate в
+generic `kmeans_emd_profiled_with_assignment()`: порог ordinary moved теперь
+принимается только при точном численном нуле final changed fraction, включая
+signed zero. При ненулевой смене цикл продолжается без скрытого update;
+termination и фактическая consistency устанавливаются также без opt-in
+вывода. Стоимость gate отделена от отдельной финальной проверки в EMD
+profile, а flop CLI записывает termination/consistency независимо от флага
+вывода. Выполнены только unit/CLI тесты: генератор, capture/replay и
+continuation не запускались. Детали:
+`web_reports/potential-emd-generic-final-assignment-gate-20261103.md`.

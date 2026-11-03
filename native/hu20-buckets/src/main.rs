@@ -331,6 +331,15 @@ fn build(args: &[String]) {
             for (iteration, diagnostic) in flop_clusters.diagnostics.iter().enumerate() {
                 log.stage("flop-clustering", &format!("k={k}, iteration={}, objective_before={:.9}, objective_after={:.9}, moved_weight_fraction={:.9}, occupied_buckets={}", iteration + 1, diagnostic.objective_before_update, diagnostic.objective_after_update, diagnostic.moved_weight_fraction, diagnostic.occupied_buckets));
             }
+            if let Some(termination) = flop_clusters.termination {
+                log.stage(
+                    "flop-clustering",
+                    &format!(
+                        "k={k}, termination={termination:?}, final_assignment_consistent={}",
+                        flop_clusters.final_assignment_consistent
+                    ),
+                );
+            }
             if let Some(diagnostic) = &flop_clusters.final_assignment_diagnostic {
                 log.stage("flop-clustering", &format!("k={k}, final_assignment_diagnostic=true, changed_weight_fraction={:.9}, objective={:.9}", diagnostic.changed_weight_fraction, diagnostic.objective));
             }
@@ -372,13 +381,27 @@ fn build(args: &[String]) {
                     ),
                     _ => "null".to_owned(),
                 };
+                let final_assignment_gate = match (
+                    flop_profile.final_assignment_gate_wall_clock,
+                    flop_profile.final_assignment_gate_emd_calls,
+                ) {
+                    (Some(wall_clock), Some(emd_calls)) => format!(
+                        "{{\"wall_seconds\": {:.9}, \"emd_calls\": {emd_calls}}}",
+                        wall_clock.as_secs_f64(),
+                    ),
+                    _ => "null".to_owned(),
+                };
                 profiling_parts.push(format!(
-                    "{{\"k\": {k}, \"turn_ground_matrix\": {{\"wall_seconds\": {:.9}, \"emd_calls\": {turn_ground_emd_calls}}}, \"flop_clustering_wall_seconds\": {:.9}, \"flop_iterations\": [{iterations}], \"final_assignment_diagnostic\": {final_diagnostic}}}",
+                    "{{\"k\": {k}, \"turn_ground_matrix\": {{\"wall_seconds\": {:.9}, \"emd_calls\": {turn_ground_emd_calls}}}, \"flop_clustering_wall_seconds\": {:.9}, \"flop_iterations\": [{iterations}], \"final_assignment_gate\": {final_assignment_gate}, \"final_assignment_diagnostic\": {final_diagnostic}}}",
                     turn_ground_wall_clock.as_secs_f64(),
                     flop_profile.wall_clock.as_secs_f64(),
                 ));
             }
-            parts.push(format!("{{\"k\": {k}, \"river_classes\": {}, \"turn_classes\": {}, \"flop_classes\": {}, \"river_objective\": {:?}, \"turn_objective\": {:?}, \"flop_objective\": {:?}}}", river.keys.len(), turn.keys.len(), flop.keys.len(), river_clusters.objective, turn_clusters.objective, flop_clusters.objective));
+            let flop_termination = flop_clusters
+                .termination
+                .map(|termination| format!("{termination:?}"))
+                .unwrap_or_else(|| "Unrecorded".to_owned());
+            parts.push(format!("{{\"k\": {k}, \"river_classes\": {}, \"turn_classes\": {}, \"flop_classes\": {}, \"river_objective\": {:?}, \"turn_objective\": {:?}, \"flop_objective\": {:?}, \"flop_termination\": {:?}, \"flop_final_assignment_consistent\": {}}}", river.keys.len(), turn.keys.len(), flop.keys.len(), river_clusters.objective, turn_clusters.objective, flop_clusters.objective, flop_termination, flop_clusters.final_assignment_consistent));
         }
         summary.push(format!("\"tables\": [{}]", parts.join(", ")));
         if !profiling_parts.is_empty() {
