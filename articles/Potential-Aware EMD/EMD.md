@@ -696,3 +696,16 @@ Commit перед запуском: `f4a9723d00afd7a20617433ad60cc4e94b2895d9`; 
 было чистым. Continuation 29–50, flop и production-таблицы не запускались,
 оставшихся процессов нет. Детали:
 `web_reports/potential-emd-r7-k10-turn-replay-only-20261103.md`.
+
+### Continuation R7/K10 из checkpoint-28: остановка до шага 29
+
+После успешного exact `VerifyOnly` и проверки SHA-256 checkpoint-28 выполнен
+ровно один test-only continuation-run с лимитом `300 с`. Cargo выполнил ровно
+один целевой ignored-test, но тот завершился с `exit_code=101` за `1.15 с`
+до шага 29. Строгая исходная диагностика дала фактический IEEE-754 changed
+weight fraction `0.000019111323459144`, тогда как сохранённое десятичное
+контрольное значение равно `0.000019111323459150`. Допуск не расширялся,
+поэтому checkpoints 29–50, trace значений шагов и вывод о точном нуле не
+получены. Timeout не сработал, оставшихся процессов нет; повтор и
+альтернативный probe не выполнялись. Детали:
+`web_reports/potential-emd-r7-k10-turn-checkpoint28-continuation-20261103.md`.
