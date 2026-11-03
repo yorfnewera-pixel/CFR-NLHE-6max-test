@@ -832,3 +832,14 @@ fraction и `final_assignment_consistent=true`; его новый hash отли�
 исторической таблицы шага 30. Gate profile: 3.585217600 с и 487690
 EMD-вызовов, отдельная диагностика не потребовалась. Детали:
 `web_reports/potential-emd-r7-k10-turn50-flop50-generic-gate-control-20261103.md`.
+
+### Offline-сверка objectives checkpoint-40 и production summary
+
+Только offline-проверка checkpoint-40 continuation и существующего
+production `summary.json` `10/50/50` подтвердила: objectives flop 31–40
+совпадают побитово по `f64::to_bits()`. SHA-256 checkpoint-40 совпал с
+опубликованным значением. Разбор исходных JSON-токенов production summary
+вернул те же биты, поэтому для этих десяти objectives формат сохраняет
+round-trip f64; округлённый CLI-лог не использовался. Это не является
+доказательством побитового равенства полного состояния. Детали:
+`web_reports/potential-emd-r7-k10-flop-objective-bits-offline-audit-20261103.md`.
