@@ -3097,6 +3097,270 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct TestOnlyWasserstein1dStepperSnapshot {
+        assignment: Vec<u16>,
+        centroids: Vec<f32>,
+        rng_state: u64,
+        objective: Vec<f64>,
+        diagnostics: Vec<TestOnlyEmdIteration>,
+        stabilized: bool,
+    }
+
+    struct TestOnlyWasserstein1dStepper<'a> {
+        sorted_points: Vec<f32>,
+        dimension: usize,
+        weight: &'a [u64],
+        order: Vec<usize>,
+        sorted_coordinates: Vec<f32>,
+        k: usize,
+        assignment: Vec<u16>,
+        centroids: Vec<f32>,
+        rng: Rng,
+        objective: Vec<f64>,
+        diagnostics: Vec<TestOnlyEmdIteration>,
+        stabilized: bool,
+        input_fingerprint: u64,
+    }
+
+    impl<'a> TestOnlyWasserstein1dStepper<'a> {
+        fn new(
+            points: &[f32],
+            weight: &'a [u64],
+            coordinates: &[f32],
+            k: usize,
+            seed: u64,
+        ) -> Self {
+            let dimension = coordinates.len();
+            let n = weight.len();
+            assert!(points.len() == n * dimension && k <= n && k <= u16::MAX as usize);
+            let mut order: Vec<usize> = (0..dimension).collect();
+            order.sort_unstable_by(|&left, &right| {
+                coordinates[left].partial_cmp(&coordinates[right]).unwrap()
+            });
+            let sorted_coordinates: Vec<f32> =
+                order.iter().map(|&index| coordinates[index]).collect();
+            let mut sorted_points = vec![0.0; points.len()];
+            for point in 0..n {
+                for (sorted_index, &original_index) in order.iter().enumerate() {
+                    sorted_points[point * dimension + sorted_index] =
+                        points[point * dimension + original_index];
+                }
+            }
+            let row = |index: usize| &sorted_points[index * dimension..(index + 1) * dimension];
+            let mut rng = Rng(seed);
+            let mut centroids = Vec::with_capacity(k * dimension);
+            for _ in 0..k {
+                centroids.extend_from_slice(row((rng.next() % n as u64) as usize));
+            }
+            Self {
+                sorted_points,
+                dimension,
+                weight,
+                order,
+                sorted_coordinates,
+                k,
+                assignment: vec![u16::MAX; n],
+                centroids,
+                rng,
+                objective: Vec::new(),
+                diagnostics: Vec::new(),
+                stabilized: false,
+                input_fingerprint: test_only_wasserstein_input_fingerprint(
+                    points,
+                    weight,
+                    coordinates,
+                    k,
+                ),
+            }
+        }
+
+        fn from_snapshot(
+            points: &[f32],
+            weight: &'a [u64],
+            coordinates: &[f32],
+            k: usize,
+            snapshot: TestOnlyWasserstein1dStepperSnapshot,
+        ) -> Self {
+            let mut stepper = Self::new(points, weight, coordinates, k, 0);
+            assert!(
+                snapshot.assignment.len() == weight.len()
+                    && snapshot.centroids.len() == k * coordinates.len()
+            );
+            stepper.assignment = snapshot.assignment;
+            stepper.centroids = snapshot.centroids;
+            stepper.rng = Rng(snapshot.rng_state);
+            stepper.objective = snapshot.objective;
+            stepper.diagnostics = snapshot.diagnostics;
+            stepper.stabilized = snapshot.stabilized;
+            stepper
+        }
+
+        fn row(&self, index: usize) -> &[f32] {
+            &self.sorted_points[index * self.dimension..(index + 1) * self.dimension]
+        }
+
+        fn step(&mut self) -> Option<TestOnlyEmdIteration> {
+            self.step_impl(true)
+        }
+
+        fn step_without_early_stop(&mut self) -> Option<TestOnlyEmdIteration> {
+            self.step_impl(false)
+        }
+
+        fn step_impl(&mut self, stop_on_early_stabilization: bool) -> Option<TestOnlyEmdIteration> {
+            if stop_on_early_stabilization && self.stabilized {
+                return None;
+            }
+            let n = self.weight.len();
+            let assigned: Vec<(u16, f32)> = (0..n)
+                .into_par_iter()
+                .map(|index| {
+                    let point = self.row(index);
+                    (0..self.k)
+                        .map(|cluster| {
+                            (
+                                cluster as u16,
+                                wasserstein_1d_sorted(
+                                    point,
+                                    &self.centroids
+                                        [cluster * self.dimension..(cluster + 1) * self.dimension],
+                                    &self.sorted_coordinates,
+                                ),
+                            )
+                        })
+                        .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
+                        .unwrap()
+                })
+                .collect();
+            let total: f64 = self.weight.iter().map(|&value| value as f64).sum();
+            let moved: f64 = assigned
+                .iter()
+                .zip(&self.assignment)
+                .zip(self.weight)
+                .filter(|((next, old), _)| next.0 != **old)
+                .map(|(_, &value)| value as f64)
+                .sum();
+            let objective_before_update = assigned
+                .iter()
+                .zip(self.weight)
+                .map(|(entry, &value)| entry.1 as f64 * value as f64)
+                .sum::<f64>()
+                / total;
+            self.objective.push(objective_before_update);
+            for (slot, entry) in self.assignment.iter_mut().zip(&assigned) {
+                *slot = entry.0;
+            }
+            let mut sums = vec![0.0f64; self.k * self.dimension];
+            let mut mass = vec![0.0f64; self.k];
+            for index in 0..n {
+                let cluster = self.assignment[index] as usize;
+                let row_weight = self.weight[index] as f64;
+                mass[cluster] += row_weight;
+                for (sum, &value) in sums[cluster * self.dimension..(cluster + 1) * self.dimension]
+                    .iter_mut()
+                    .zip(self.row(index))
+                {
+                    *sum += row_weight * value as f64;
+                }
+            }
+            for cluster in 0..self.k {
+                if mass[cluster] > 0.0 {
+                    for offset in 0..self.dimension {
+                        self.centroids[cluster * self.dimension + offset] =
+                            (sums[cluster * self.dimension + offset] / mass[cluster]) as f32;
+                    }
+                }
+            }
+            let objective_after_update = (0..n)
+                .map(|index| {
+                    let cluster = self.assignment[index] as usize;
+                    wasserstein_1d_sorted(
+                        self.row(index),
+                        &self.centroids[cluster * self.dimension..(cluster + 1) * self.dimension],
+                        &self.sorted_coordinates,
+                    ) as f64
+                        * self.weight[index] as f64
+                })
+                .sum::<f64>()
+                / total;
+            let diagnostic = TestOnlyEmdIteration {
+                objective_before_update,
+                objective_after_update,
+                objective_after_reassignment: None,
+                moved_weight_fraction: moved / total,
+                occupied_buckets: mass.iter().filter(|&&value| value > 0.0).count(),
+            };
+            self.stabilized =
+                stop_on_early_stabilization && diagnostic.moved_weight_fraction < 1e-4;
+            self.diagnostics.push(diagnostic.clone());
+            Some(diagnostic)
+        }
+
+        fn centroids(&self) -> Vec<f32> {
+            let mut original_centroids = vec![0.0; self.k * self.dimension];
+            for cluster in 0..self.k {
+                for (sorted_index, &original_index) in self.order.iter().enumerate() {
+                    original_centroids[cluster * self.dimension + original_index] =
+                        self.centroids[cluster * self.dimension + sorted_index];
+                }
+            }
+            original_centroids
+        }
+
+        fn final_assignment_diagnostic(&self) -> FinalAssignmentDiagnostic {
+            let n = self.weight.len();
+            let reassigned: Vec<(u16, f32)> = (0..n)
+                .into_par_iter()
+                .map(|index| {
+                    let point = self.row(index);
+                    (0..self.k)
+                        .map(|cluster| {
+                            (
+                                cluster as u16,
+                                wasserstein_1d_sorted(
+                                    point,
+                                    &self.centroids
+                                        [cluster * self.dimension..(cluster + 1) * self.dimension],
+                                    &self.sorted_coordinates,
+                                ),
+                            )
+                        })
+                        .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
+                        .unwrap()
+                })
+                .collect();
+            let total: f64 = self.weight.iter().map(|&value| value as f64).sum();
+            let changed_weight_fraction = reassigned
+                .iter()
+                .zip(&self.assignment)
+                .zip(self.weight)
+                .filter(|((next, current), _)| next.0 != **current)
+                .map(|(_, &value)| value as f64)
+                .sum::<f64>()
+                / total;
+            let objective = reassigned
+                .iter()
+                .zip(self.weight)
+                .map(|(entry, &value)| entry.1 as f64 * value as f64)
+                .sum::<f64>()
+                / total;
+            FinalAssignmentDiagnostic {
+                changed_weight_fraction,
+                objective,
+            }
+        }
+
+        fn state_words(&self) -> Vec<u32> {
+            self.assignment
+                .iter()
+                .map(|&assignment| assignment as u32)
+                .chain(self.centroids.iter().map(|value| value.to_bits()))
+                .chain([(self.rng.0 >> 32) as u32, self.rng.0 as u32])
+                .collect()
+        }
+    }
+
     #[test]
     fn test_only_stepper_can_continue_past_early_stop() {
         let points = [1.0f32, 0.0, 0.0, 1.0];
@@ -3136,6 +3400,33 @@ mod tests {
                     .flat_map(|&value| [value as u32, (value >> 32) as u32]),
             )
             .chain([dim as u32, (dim >> 32) as u32, k as u32, (k >> 32) as u32]);
+        words.fold(0xcbf2_9ce4_8422_2325u64, |hash, word| {
+            (hash ^ word as u64).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    }
+
+    fn test_only_wasserstein_input_fingerprint(
+        points: &[f32],
+        weight: &[u64],
+        coordinates: &[f32],
+        k: usize,
+    ) -> u64 {
+        const BACKEND_ID: u64 = TestOnlyWasserstein1dCheckpoint::BACKEND_ID;
+        let words = [BACKEND_ID as u32, (BACKEND_ID >> 32) as u32]
+            .into_iter()
+            .chain(points.iter().map(|value| value.to_bits()))
+            .chain(coordinates.iter().map(|value| value.to_bits()))
+            .chain(
+                weight
+                    .iter()
+                    .flat_map(|&value| [value as u32, (value >> 32) as u32]),
+            )
+            .chain([
+                coordinates.len() as u32,
+                (coordinates.len() >> 32) as u32,
+                k as u32,
+                (k >> 32) as u32,
+            ]);
         words.fold(0xcbf2_9ce4_8422_2325u64, |hash, word| {
             (hash ^ word as u64).wrapping_mul(0x0000_0100_0000_01b3)
         })
@@ -3372,6 +3663,150 @@ mod tests {
         }
     }
 
+    struct TestOnlyWasserstein1dCheckpoint;
+
+    impl TestOnlyWasserstein1dCheckpoint {
+        const MAGIC: [u8; 8] = *b"HU20CW01";
+        const BACKEND_ID: u64 = 0x5731_442D_534F_5254;
+
+        fn write_atomic(
+            path: &std::path::Path,
+            stepper: &TestOnlyWasserstein1dStepper<'_>,
+        ) -> std::io::Result<()> {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&Self::MAGIC);
+            for value in [
+                Self::BACKEND_ID,
+                stepper.dimension as u64,
+                stepper.k as u64,
+                stepper.weight.len() as u64,
+                stepper.input_fingerprint,
+                stepper.diagnostics.len() as u64,
+                stepper.rng.0,
+            ] {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            bytes.push(u8::from(stepper.stabilized));
+            TestOnlyEmdCheckpoint::write_u16s(&mut bytes, &stepper.assignment);
+            TestOnlyEmdCheckpoint::write_f32s(&mut bytes, &stepper.centroids);
+            TestOnlyEmdCheckpoint::write_f64s(&mut bytes, &stepper.objective);
+            bytes.extend_from_slice(&(stepper.diagnostics.len() as u64).to_le_bytes());
+            for diagnostic in &stepper.diagnostics {
+                bytes
+                    .extend_from_slice(&diagnostic.objective_before_update.to_bits().to_le_bytes());
+                bytes.extend_from_slice(&diagnostic.objective_after_update.to_bits().to_le_bytes());
+                match diagnostic.objective_after_reassignment {
+                    Some(value) => {
+                        bytes.push(1);
+                        bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+                    }
+                    None => bytes.push(0),
+                }
+                bytes.extend_from_slice(&diagnostic.moved_weight_fraction.to_bits().to_le_bytes());
+                bytes.extend_from_slice(&(diagnostic.occupied_buckets as u64).to_le_bytes());
+            }
+            let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+            if temporary.exists() {
+                std::fs::remove_file(&temporary)?;
+            }
+            std::fs::write(&temporary, bytes)?;
+            match std::fs::rename(&temporary, path) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    let _ = std::fs::remove_file(&temporary);
+                    Err(error)
+                }
+            }
+        }
+
+        fn load(
+            path: &std::path::Path,
+            points: &[f32],
+            weight: &[u64],
+            coordinates: &[f32],
+            k: usize,
+        ) -> Result<TestOnlyWasserstein1dStepperSnapshot, String> {
+            let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+            let mut offset = 0usize;
+            let magic = TestOnlyEmdCheckpoint::read_bytes(&bytes, &mut offset, 8)?;
+            if magic != Self::MAGIC {
+                return Err("checkpoint несовместим с backend Wasserstein-1D".to_owned());
+            }
+            let backend_id = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?;
+            if backend_id != Self::BACKEND_ID {
+                return Err("checkpoint несовместим с backend Wasserstein-1D".to_owned());
+            }
+            let dimension = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            let checkpoint_k = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            let point_count = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            let input_fingerprint = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?;
+            let iterations = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            let rng_state = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?;
+            let stabilized = match TestOnlyEmdCheckpoint::read_u8(&bytes, &mut offset)? {
+                0 => false,
+                1 => true,
+                _ => return Err("некорректный флаг стабилизации checkpoint".to_owned()),
+            };
+            if dimension != coordinates.len() || checkpoint_k != k || point_count != weight.len() {
+                return Err("checkpoint несовместим с размерностями или K".to_owned());
+            }
+            if input_fingerprint
+                != test_only_wasserstein_input_fingerprint(points, weight, coordinates, k)
+            {
+                return Err("checkpoint несовместим с координатами или точными входами".to_owned());
+            }
+            let assignment = TestOnlyEmdCheckpoint::read_u16s(&bytes, &mut offset)?;
+            let centroids = TestOnlyEmdCheckpoint::read_f32s(&bytes, &mut offset)?;
+            let objective = TestOnlyEmdCheckpoint::read_f64s(&bytes, &mut offset)?;
+            let diagnostics_len = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            if assignment.len() != point_count
+                || centroids.len() != checkpoint_k * dimension
+                || objective.len() != iterations
+                || diagnostics_len != iterations
+            {
+                return Err("checkpoint содержит несовместимые длины состояния".to_owned());
+            }
+            let mut diagnostics = Vec::with_capacity(diagnostics_len);
+            for _ in 0..diagnostics_len {
+                let objective_before_update =
+                    f64::from_bits(TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?);
+                let objective_after_update =
+                    f64::from_bits(TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?);
+                let objective_after_reassignment =
+                    match TestOnlyEmdCheckpoint::read_u8(&bytes, &mut offset)? {
+                        0 => None,
+                        1 => Some(f64::from_bits(TestOnlyEmdCheckpoint::read_u64(
+                            &bytes,
+                            &mut offset,
+                        )?)),
+                        _ => return Err("некорректный флаг reassignment checkpoint".to_owned()),
+                    };
+                let moved_weight_fraction =
+                    f64::from_bits(TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?);
+                let occupied_buckets =
+                    TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+                diagnostics.push(TestOnlyEmdIteration {
+                    objective_before_update,
+                    objective_after_update,
+                    objective_after_reassignment,
+                    moved_weight_fraction,
+                    occupied_buckets,
+                });
+            }
+            if offset != bytes.len() {
+                return Err("лишние байты в checkpoint".to_owned());
+            }
+            Ok(TestOnlyWasserstein1dStepperSnapshot {
+                assignment,
+                centroids,
+                rng_state,
+                objective,
+                diagnostics,
+                stabilized,
+            })
+        }
+    }
+
     fn test_only_record_step(
         trace: &mut std::fs::File,
         seen: &mut std::collections::HashMap<Vec<u32>, usize>,
@@ -3399,6 +3834,35 @@ mod tests {
         repeated
     }
 
+    fn test_only_wasserstein_record_step(
+        trace: &mut std::fs::File,
+        seen: &mut std::collections::HashMap<Vec<u32>, usize>,
+        iteration: usize,
+        stepper: &TestOnlyWasserstein1dStepper<'_>,
+        diagnostic: &TestOnlyEmdIteration,
+    ) -> Option<(usize, usize)> {
+        use std::io::Write;
+
+        let state = stepper.state_words();
+        let fingerprint = test_only_state_fingerprint(&state);
+        let repeated = seen
+            .insert(state, iteration)
+            .map(|first_seen_at| (first_seen_at, iteration));
+        writeln!(
+            trace,
+            "iteration={iteration} objective_before={:.9} objective_after={:.9} moved_weight_fraction={:.9} occupied_buckets={} state_fingerprint={fingerprint:016X}",
+            diagnostic.objective_before_update,
+            diagnostic.objective_after_update,
+            diagnostic.moved_weight_fraction,
+            diagnostic.occupied_buckets,
+        )
+        .expect("write per-step Wasserstein probe trace");
+        trace
+            .flush()
+            .expect("flush per-step Wasserstein probe trace");
+        repeated
+    }
+
     fn test_only_write_checkpoint(
         directory: &std::path::Path,
         iteration: usize,
@@ -3413,6 +3877,21 @@ mod tests {
         TestOnlyEmdCheckpoint::write_atomic(&path, stepper).expect("write atomic step checkpoint");
     }
 
+    fn test_only_write_wasserstein_checkpoint(
+        directory: &std::path::Path,
+        iteration: usize,
+        stepper: &TestOnlyWasserstein1dStepper<'_>,
+    ) {
+        let path = directory.join(format!("checkpoint-{iteration:02}.bin"));
+        assert!(
+            !path.exists(),
+            "checkpoint already exists: {}",
+            path.display()
+        );
+        TestOnlyWasserstein1dCheckpoint::write_atomic(&path, stepper)
+            .expect("write atomic Wasserstein step checkpoint");
+    }
+
     fn test_only_resume_from_checkpoint<'a>(
         path: &std::path::Path,
         points: &'a [f32],
@@ -3424,6 +3903,23 @@ mod tests {
         let snapshot = TestOnlyEmdCheckpoint::load(path, points, dim, weight, ground, k)?;
         Ok(TestOnlyEmdStepper::from_snapshot(
             points, dim, weight, ground, k, snapshot,
+        ))
+    }
+
+    fn test_only_resume_wasserstein_from_checkpoint<'a>(
+        path: &std::path::Path,
+        points: &[f32],
+        weight: &'a [u64],
+        coordinates: &[f32],
+        k: usize,
+    ) -> Result<TestOnlyWasserstein1dStepper<'a>, String> {
+        let snapshot = TestOnlyWasserstein1dCheckpoint::load(path, points, weight, coordinates, k)?;
+        Ok(TestOnlyWasserstein1dStepper::from_snapshot(
+            points,
+            weight,
+            coordinates,
+            k,
+            snapshot,
         ))
     }
 
@@ -4698,29 +5194,30 @@ mod tests {
         let deck = deck(7);
         let river = RiverTable::build(&deck);
         let river_clusters = kmeans(&river.equity, 1, &river.weight, K, SEED, 10);
-        let mut river_ground = vec![0.0; K * K];
-        for left in 0..K {
-            for right in 0..K {
-                river_ground[left * K + right] =
-                    (river_clusters.centroids[left] - river_clusters.centroids[right]).abs();
-            }
-        }
         let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, K);
-        let mut stepper =
-            TestOnlyEmdStepper::new(&turn.distribution, K, &turn.weight, &river_ground, K, SEED);
+        let mut stepper = TestOnlyWasserstein1dStepper::new(
+            &turn.distribution,
+            &turn.weight,
+            &river_clusters.centroids,
+            K,
+            SEED,
+        );
         let mut seen = std::collections::HashMap::new();
         for iteration in 1..=28 {
-            let diagnostic = stepper
-                .step()
-                .expect("valid production-order prefix step")
-                .expect("prefix must return a diagnostic");
+            let diagnostic = stepper.step().expect("prefix must return a diagnostic");
             assert_eq!(
                 stepper.objective[iteration - 1],
                 CONTROL_TURN_OBJECTIVES[iteration - 1],
                 "turn objective mismatch at iteration {iteration}"
             );
             assert_eq!(
-                test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic),
+                test_only_wasserstein_record_step(
+                    &mut trace,
+                    &mut seen,
+                    iteration,
+                    &stepper,
+                    &diagnostic,
+                ),
                 None,
                 "prefix repeated a complete algorithmic state"
             );
@@ -4731,9 +5228,7 @@ mod tests {
         );
         assert_eq!(stepper.objective, CONTROL_TURN_OBJECTIVES);
         let state_before_diagnostic = stepper.state_words();
-        let step_28_diagnostic = stepper
-            .final_assignment_diagnostic()
-            .expect("valid step-28 final reassignment");
+        let step_28_diagnostic = stepper.final_assignment_diagnostic();
         assert_eq!(state_before_diagnostic, stepper.state_words());
         assert_eq!(
             format!("{:.9}", step_28_diagnostic.changed_weight_fraction),
@@ -4750,13 +5245,12 @@ mod tests {
         )
         .expect("write step-28 final diagnostic");
         trace.flush().expect("flush step-28 final diagnostic");
-        test_only_write_checkpoint(&checkpoint_directory, 28, &stepper);
-        let resumed = test_only_resume_from_checkpoint(
+        test_only_write_wasserstein_checkpoint(&checkpoint_directory, 28, &stepper);
+        let resumed = test_only_resume_wasserstein_from_checkpoint(
             &checkpoint_directory.join("checkpoint-28.bin"),
             &turn.distribution,
-            K,
             &turn.weight,
-            &river_ground,
+            &river_clusters.centroids,
             K,
         )
         .expect("load verified new step-28 checkpoint");
@@ -4767,13 +5261,10 @@ mod tests {
         for iteration in 29..=50 {
             let diagnostic = stepper
                 .step_without_early_stop()
-                .expect("valid test-only continuation step")
                 .expect("test-only continuation must not stop early");
-            test_only_write_checkpoint(&checkpoint_directory, iteration, &stepper);
+            test_only_write_wasserstein_checkpoint(&checkpoint_directory, iteration, &stepper);
             let state_before_diagnostic = stepper.state_words();
-            let final_diagnostic = stepper
-                .final_assignment_diagnostic()
-                .expect("valid continuation final reassignment");
+            let final_diagnostic = stepper.final_assignment_diagnostic();
             assert_eq!(state_before_diagnostic, stepper.state_words());
             writeln!(
                 trace,
@@ -4782,9 +5273,13 @@ mod tests {
             )
             .expect("write continuation final diagnostic");
             trace.flush().expect("flush continuation final diagnostic");
-            if let Some((first_seen_at, repeated_at)) =
-                test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic)
-            {
+            if let Some((first_seen_at, repeated_at)) = test_only_wasserstein_record_step(
+                &mut trace,
+                &mut seen,
+                iteration,
+                &stepper,
+                &diagnostic,
+            ) {
                 terminal_reason = "repeated-state";
                 writeln!(trace, "terminal reason={terminal_reason} first={first_seen_at} repeated={repeated_at}")
                     .expect("write repeated state");
@@ -5402,6 +5897,210 @@ mod tests {
         )
         .expect("write final resume diagnostic");
         trace.flush().expect("flush final resume diagnostic");
+    }
+
+    #[test]
+    fn test_only_wasserstein_stepper_matches_production_trajectory() {
+        let coordinates = vec![0.9, 0.1, 0.5];
+        let points = vec![
+            0.7, 0.1, 0.2, // sorted: 0.1, 0.2, 0.7
+            0.1, 0.8, 0.1, // sorted: 0.8, 0.1, 0.1
+            0.2, 0.2, 0.6, // sorted: 0.2, 0.6, 0.2
+            0.0, 0.2, 0.8, // sorted: 0.2, 0.8, 0.0
+        ];
+        let weights = vec![1, 2, 3, 4];
+        let seed = 23;
+        let expected = kmeans_wasserstein_1d_with_diagnostics(
+            &points,
+            &weights,
+            &coordinates,
+            2,
+            seed,
+            4,
+            true,
+        );
+        let mut stepper =
+            TestOnlyWasserstein1dStepper::new(&points, &weights, &coordinates, 2, seed);
+
+        while stepper.step().is_some() {}
+
+        assert_eq!(stepper.assignment, expected.assignment);
+        assert_eq!(
+            stepper
+                .centroids()
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            stepper
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(stepper.diagnostics.len(), expected.diagnostics.len());
+        for (actual, expected) in stepper.diagnostics.iter().zip(&expected.diagnostics) {
+            assert_eq!(
+                actual.objective_before_update.to_bits(),
+                expected.objective_before_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_update.to_bits(),
+                expected.objective_after_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_reassignment.map(f64::to_bits),
+                expected.objective_after_reassignment.map(f64::to_bits)
+            );
+            assert_eq!(
+                actual.moved_weight_fraction.to_bits(),
+                expected.moved_weight_fraction.to_bits()
+            );
+            assert_eq!(actual.occupied_buckets, expected.occupied_buckets);
+        }
+        let mut expected_rng = Rng(seed);
+        for _ in 0..2 {
+            expected_rng.next();
+        }
+        assert_eq!(stepper.rng.0, expected_rng.0);
+        let actual_final_diagnostic = stepper.final_assignment_diagnostic();
+        let expected_final_diagnostic = expected
+            .final_assignment_diagnostic
+            .expect("requested production final diagnostic");
+        assert_eq!(
+            actual_final_diagnostic.changed_weight_fraction.to_bits(),
+            expected_final_diagnostic.changed_weight_fraction.to_bits()
+        );
+        assert_eq!(
+            actual_final_diagnostic.objective.to_bits(),
+            expected_final_diagnostic.objective.to_bits()
+        );
+    }
+
+    #[test]
+    fn test_only_wasserstein_stepper_can_continue_past_early_stop() {
+        let points = vec![1.0, 0.0, 0.0, 1.0];
+        let weights = vec![1, 1];
+        let coordinates = vec![0.0, 1.0];
+        let mut stepper = TestOnlyWasserstein1dStepper::new(&points, &weights, &coordinates, 1, 7);
+        stepper.stabilized = true;
+
+        assert!(stepper.step_without_early_stop().is_some());
+        assert!(!stepper.stabilized);
+    }
+
+    #[test]
+    fn test_only_wasserstein_checkpoint_restores_exact_state_and_rejects_other_backends() {
+        let coordinates = vec![0.9, 0.1, 0.5];
+        let points = vec![0.7, 0.1, 0.2, 0.1, 0.8, 0.1, 0.2, 0.2, 0.6, 0.0, 0.2, 0.8];
+        let weights = vec![1, 2, 3, 4];
+        let path = std::env::temp_dir().join(format!(
+            "hu20-test-only-wasserstein-checkpoint-{}.bin",
+            std::process::id()
+        ));
+        let transport_path = std::env::temp_dir().join(format!(
+            "hu20-test-only-transport-checkpoint-{}.bin",
+            std::process::id()
+        ));
+
+        let mut continuous =
+            TestOnlyWasserstein1dStepper::new(&points, &weights, &coordinates, 2, 23);
+        for _ in 0..4 {
+            let _ = continuous.step();
+        }
+
+        let mut interrupted =
+            TestOnlyWasserstein1dStepper::new(&points, &weights, &coordinates, 2, 23);
+        assert!(interrupted.step().is_some());
+        TestOnlyWasserstein1dCheckpoint::write_atomic(&path, &interrupted)
+            .expect("write Wasserstein checkpoint");
+        let snapshot =
+            TestOnlyWasserstein1dCheckpoint::load(&path, &points, &weights, &coordinates, 2)
+                .expect("load compatible Wasserstein checkpoint");
+        let mut resumed = TestOnlyWasserstein1dStepper::from_snapshot(
+            &points,
+            &weights,
+            &coordinates,
+            2,
+            snapshot,
+        );
+        for _ in 0..3 {
+            let _ = resumed.step();
+        }
+        assert_eq!(continuous.state_words(), resumed.state_words());
+        assert_eq!(
+            continuous
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            resumed
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(continuous.diagnostics.len(), resumed.diagnostics.len());
+        for (actual, expected) in continuous.diagnostics.iter().zip(&resumed.diagnostics) {
+            assert_eq!(
+                actual.objective_before_update.to_bits(),
+                expected.objective_before_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_update.to_bits(),
+                expected.objective_after_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_reassignment.map(f64::to_bits),
+                expected.objective_after_reassignment.map(f64::to_bits)
+            );
+            assert_eq!(
+                actual.moved_weight_fraction.to_bits(),
+                expected.moved_weight_fraction.to_bits()
+            );
+            assert_eq!(actual.occupied_buckets, expected.occupied_buckets);
+        }
+
+        let incompatible_coordinates = vec![0.9, 0.1, 0.6];
+        let coordinate_error = TestOnlyWasserstein1dCheckpoint::load(
+            &path,
+            &points,
+            &weights,
+            &incompatible_coordinates,
+            2,
+        )
+        .err()
+        .expect("coordinates determine Wasserstein distance");
+        assert!(coordinate_error.contains("координат"));
+
+        let transport_ground = equity_ground(&coordinates);
+        let transport = TestOnlyEmdStepper::new(&points, 3, &weights, &transport_ground, 2, 23);
+        TestOnlyEmdCheckpoint::write_atomic(&transport_path, &transport)
+            .expect("write transport checkpoint");
+        let backend_error = TestOnlyWasserstein1dCheckpoint::load(
+            &transport_path,
+            &points,
+            &weights,
+            &coordinates,
+            2,
+        )
+        .err()
+        .expect("transport checkpoint is not a Wasserstein checkpoint");
+        assert!(backend_error.contains("backend"));
+
+        std::fs::remove_file(path).expect("remove Wasserstein checkpoint");
+        std::fs::remove_file(transport_path).expect("remove transport checkpoint");
     }
 
     #[test]
