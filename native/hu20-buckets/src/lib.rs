@@ -2709,6 +2709,243 @@ mod tests {
         })
     }
 
+    fn test_only_input_fingerprint(
+        points: &[f32],
+        dim: usize,
+        weight: &[u64],
+        ground: &[f32],
+        k: usize,
+    ) -> u64 {
+        let words = points
+            .iter()
+            .map(|value| value.to_bits())
+            .chain(ground.iter().map(|value| value.to_bits()))
+            .chain(
+                weight
+                    .iter()
+                    .flat_map(|&value| [value as u32, (value >> 32) as u32]),
+            )
+            .chain([dim as u32, (dim >> 32) as u32, k as u32, (k >> 32) as u32]);
+        words.fold(0xcbf2_9ce4_8422_2325u64, |hash, word| {
+            (hash ^ word as u64).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    }
+
+    struct TestOnlyEmdCheckpoint;
+
+    impl TestOnlyEmdCheckpoint {
+        const MAGIC: [u8; 8] = *b"HU20CP01";
+
+        fn write_atomic(
+            path: &std::path::Path,
+            stepper: &TestOnlyEmdStepper<'_>,
+        ) -> std::io::Result<()> {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&Self::MAGIC);
+            for value in [
+                stepper.dim as u64,
+                stepper.k as u64,
+                stepper.weight.len() as u64,
+                test_only_input_fingerprint(
+                    stepper.points,
+                    stepper.dim,
+                    stepper.weight,
+                    stepper.ground,
+                    stepper.k,
+                ),
+                stepper.diagnostics.len() as u64,
+                stepper.rng.0,
+            ] {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            bytes.push(u8::from(stepper.stabilized));
+            Self::write_u16s(&mut bytes, &stepper.assignment);
+            Self::write_f32s(&mut bytes, &stepper.centroids);
+            Self::write_f64s(&mut bytes, &stepper.objective);
+            bytes.extend_from_slice(&(stepper.diagnostics.len() as u64).to_le_bytes());
+            for diagnostic in &stepper.diagnostics {
+                bytes
+                    .extend_from_slice(&diagnostic.objective_before_update.to_bits().to_le_bytes());
+                bytes.extend_from_slice(&diagnostic.objective_after_update.to_bits().to_le_bytes());
+                match diagnostic.objective_after_reassignment {
+                    Some(value) => {
+                        bytes.push(1);
+                        bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+                    }
+                    None => bytes.push(0),
+                }
+                bytes.extend_from_slice(&diagnostic.moved_weight_fraction.to_bits().to_le_bytes());
+                bytes.extend_from_slice(&(diagnostic.occupied_buckets as u64).to_le_bytes());
+            }
+            let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+            if temporary.exists() {
+                std::fs::remove_file(&temporary)?;
+            }
+            std::fs::write(&temporary, bytes)?;
+            match std::fs::rename(&temporary, path) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    let _ = std::fs::remove_file(&temporary);
+                    Err(error)
+                }
+            }
+        }
+
+        fn load(
+            path: &std::path::Path,
+            points: &[f32],
+            dim: usize,
+            weight: &[u64],
+            ground: &[f32],
+            k: usize,
+        ) -> Result<TestOnlyEmdStepperSnapshot, String> {
+            let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+            let mut offset = 0usize;
+            let magic = Self::read_bytes(&bytes, &mut offset, 8)?;
+            if magic != Self::MAGIC {
+                return Err("неверный magic test-only checkpoint".to_owned());
+            }
+            let checkpoint_dim = Self::read_u64(&bytes, &mut offset)? as usize;
+            let checkpoint_k = Self::read_u64(&bytes, &mut offset)? as usize;
+            let checkpoint_n = Self::read_u64(&bytes, &mut offset)? as usize;
+            let checkpoint_input = Self::read_u64(&bytes, &mut offset)?;
+            let checkpoint_iterations = Self::read_u64(&bytes, &mut offset)? as usize;
+            let rng_state = Self::read_u64(&bytes, &mut offset)?;
+            let stabilized = match Self::read_u8(&bytes, &mut offset)? {
+                0 => false,
+                1 => true,
+                _ => return Err("некорректный флаг стабилизации checkpoint".to_owned()),
+            };
+            if checkpoint_dim != dim || checkpoint_k != k || checkpoint_n != weight.len() {
+                return Err("checkpoint несовместим с размерностями или K".to_owned());
+            }
+            if checkpoint_input != test_only_input_fingerprint(points, dim, weight, ground, k) {
+                return Err("checkpoint несовместим с точными входами".to_owned());
+            }
+            let assignment = Self::read_u16s(&bytes, &mut offset)?;
+            let centroids = Self::read_f32s(&bytes, &mut offset)?;
+            let objective = Self::read_f64s(&bytes, &mut offset)?;
+            let diagnostics_len = Self::read_u64(&bytes, &mut offset)? as usize;
+            if assignment.len() != checkpoint_n
+                || centroids.len() != checkpoint_k * checkpoint_dim
+                || objective.len() != checkpoint_iterations
+                || diagnostics_len != checkpoint_iterations
+            {
+                return Err("checkpoint содержит несовместимые длины состояния".to_owned());
+            }
+            let mut diagnostics = Vec::with_capacity(diagnostics_len);
+            for _ in 0..diagnostics_len {
+                let objective_before_update = f64::from_bits(Self::read_u64(&bytes, &mut offset)?);
+                let objective_after_update = f64::from_bits(Self::read_u64(&bytes, &mut offset)?);
+                let objective_after_reassignment = match Self::read_u8(&bytes, &mut offset)? {
+                    0 => None,
+                    1 => Some(f64::from_bits(Self::read_u64(&bytes, &mut offset)?)),
+                    _ => return Err("некорректный флаг reassignment checkpoint".to_owned()),
+                };
+                let moved_weight_fraction = f64::from_bits(Self::read_u64(&bytes, &mut offset)?);
+                let occupied_buckets = Self::read_u64(&bytes, &mut offset)? as usize;
+                diagnostics.push(TestOnlyEmdIteration {
+                    objective_before_update,
+                    objective_after_update,
+                    objective_after_reassignment,
+                    moved_weight_fraction,
+                    occupied_buckets,
+                });
+            }
+            if offset != bytes.len() {
+                return Err("лишние байты в checkpoint".to_owned());
+            }
+            Ok(TestOnlyEmdStepperSnapshot {
+                assignment,
+                centroids,
+                rng_state,
+                objective,
+                diagnostics,
+                stabilized,
+            })
+        }
+
+        fn write_u16s(bytes: &mut Vec<u8>, values: &[u16]) {
+            bytes.extend_from_slice(&(values.len() as u64).to_le_bytes());
+            for &value in values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+
+        fn write_f32s(bytes: &mut Vec<u8>, values: &[f32]) {
+            bytes.extend_from_slice(&(values.len() as u64).to_le_bytes());
+            for &value in values {
+                bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+            }
+        }
+
+        fn write_f64s(bytes: &mut Vec<u8>, values: &[f64]) {
+            bytes.extend_from_slice(&(values.len() as u64).to_le_bytes());
+            for &value in values {
+                bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+            }
+        }
+
+        fn read_bytes<'b>(
+            bytes: &'b [u8],
+            offset: &mut usize,
+            len: usize,
+        ) -> Result<&'b [u8], String> {
+            let end = offset.checked_add(len).ok_or("переполнение checkpoint")?;
+            let result = bytes.get(*offset..end).ok_or("усечённый checkpoint")?;
+            *offset = end;
+            Ok(result)
+        }
+
+        fn read_u8(bytes: &[u8], offset: &mut usize) -> Result<u8, String> {
+            Ok(Self::read_bytes(bytes, offset, 1)?[0])
+        }
+
+        fn read_u64(bytes: &[u8], offset: &mut usize) -> Result<u64, String> {
+            let raw: [u8; 8] = Self::read_bytes(bytes, offset, 8)?.try_into().unwrap();
+            Ok(u64::from_le_bytes(raw))
+        }
+
+        fn read_u16s(bytes: &[u8], offset: &mut usize) -> Result<Vec<u16>, String> {
+            let len = Self::read_u64(bytes, offset)? as usize;
+            let raw = Self::read_bytes(
+                bytes,
+                offset,
+                len.checked_mul(2).ok_or("переполнение checkpoint")?,
+            )?;
+            Ok(raw
+                .chunks_exact(2)
+                .map(|chunk| u16::from_le_bytes(chunk.try_into().unwrap()))
+                .collect())
+        }
+
+        fn read_f32s(bytes: &[u8], offset: &mut usize) -> Result<Vec<f32>, String> {
+            let len = Self::read_u64(bytes, offset)? as usize;
+            let raw = Self::read_bytes(
+                bytes,
+                offset,
+                len.checked_mul(4).ok_or("переполнение checkpoint")?,
+            )?;
+            Ok(raw
+                .chunks_exact(4)
+                .map(|chunk| f32::from_bits(u32::from_le_bytes(chunk.try_into().unwrap())))
+                .collect())
+        }
+
+        fn read_f64s(bytes: &[u8], offset: &mut usize) -> Result<Vec<f64>, String> {
+            let len = Self::read_u64(bytes, offset)? as usize;
+            let raw = Self::read_bytes(
+                bytes,
+                offset,
+                len.checked_mul(8).ok_or("переполнение checkpoint")?,
+            )?;
+            Ok(raw
+                .chunks_exact(8)
+                .map(|chunk| f64::from_bits(u64::from_le_bytes(chunk.try_into().unwrap())))
+                .collect())
+        }
+    }
+
     fn test_only_record_step(
         trace: &mut std::fs::File,
         seen: &mut std::collections::HashMap<Vec<u32>, usize>,
@@ -2734,6 +2971,20 @@ mod tests {
         .expect("write per-step flop probe trace");
         trace.flush().expect("flush per-step flop probe trace");
         repeated
+    }
+
+    fn test_only_write_checkpoint(
+        directory: &std::path::Path,
+        iteration: usize,
+        stepper: &TestOnlyEmdStepper<'_>,
+    ) {
+        let path = directory.join(format!("checkpoint-{iteration:02}.bin"));
+        assert!(
+            !path.exists(),
+            "checkpoint already exists: {}",
+            path.display()
+        );
+        TestOnlyEmdCheckpoint::write_atomic(&path, stepper).expect("write atomic step checkpoint");
     }
 
     #[derive(Debug)]
@@ -3956,6 +4207,21 @@ mod tests {
 
         let trace_path = std::env::var("HU20_FLOP_PROBE_TRACE_PATH")
             .expect("HU20_FLOP_PROBE_TRACE_PATH is required for the test-only probe");
+        let checkpoint_directory = std::path::PathBuf::from(
+            std::env::var("HU20_FLOP_PROBE_CHECKPOINT_DIR")
+                .expect("HU20_FLOP_PROBE_CHECKPOINT_DIR is required for the test-only probe"),
+        );
+        assert!(
+            checkpoint_directory.is_dir(),
+            "checkpoint directory must exist"
+        );
+        assert!(
+            std::fs::read_dir(&checkpoint_directory)
+                .expect("read checkpoint directory")
+                .next()
+                .is_none(),
+            "checkpoint directory must be empty"
+        );
         let mut trace = std::fs::File::create(trace_path).expect("create flop probe trace");
         let deck = deck(6);
         let river = RiverTable::build(&deck);
@@ -3991,6 +4257,7 @@ mod tests {
                 .step()
                 .expect("valid control step")
                 .expect("control must not stabilize before iteration 10");
+            test_only_write_checkpoint(&checkpoint_directory, iteration, &stepper);
             assert_eq!(
                 test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic),
                 None
@@ -4022,6 +4289,7 @@ mod tests {
             let Some(diagnostic) = stepper.step().expect("valid continuation step") else {
                 break;
             };
+            test_only_write_checkpoint(&checkpoint_directory, iteration, &stepper);
             repeated_state =
                 test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic);
             if repeated_state.is_some() {
@@ -4123,6 +4391,67 @@ mod tests {
             );
             assert_eq!(actual.occupied_buckets, expected.occupied_buckets);
         }
+    }
+
+    #[test]
+    fn test_only_emd_checkpoint_restores_exact_state_and_rejects_other_inputs() {
+        let points = vec![1.0, 0.0, 0.8, 0.2, 0.2, 0.8, 0.0, 1.0];
+        let weights = vec![3, 5, 7, 11];
+        let ground = vec![0.0, 1.0, 1.0, 0.0];
+        let path = std::env::temp_dir().join(format!(
+            "hu20-test-only-stepper-checkpoint-{}.bin",
+            std::process::id()
+        ));
+
+        let mut continuous = TestOnlyEmdStepper::new(&points, 2, &weights, &ground, 2, 17);
+        for _ in 0..5 {
+            continuous.step().expect("valid continuous step");
+        }
+
+        let mut interrupted = TestOnlyEmdStepper::new(&points, 2, &weights, &ground, 2, 17);
+        for _ in 0..2 {
+            interrupted.step().expect("valid checkpoint prefix");
+        }
+        TestOnlyEmdCheckpoint::write_atomic(&path, &interrupted).expect("write checkpoint");
+        let snapshot = TestOnlyEmdCheckpoint::load(&path, &points, 2, &weights, &ground, 2)
+            .expect("load compatible checkpoint");
+        let mut resumed =
+            TestOnlyEmdStepper::from_snapshot(&points, 2, &weights, &ground, 2, snapshot);
+        for _ in 0..3 {
+            resumed.step().expect("valid resumed step");
+        }
+
+        assert_eq!(continuous.assignment, resumed.assignment);
+        assert_eq!(
+            continuous
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            resumed
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            continuous
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            resumed
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        let incompatible_ground = vec![0.0, 2.0, 2.0, 0.0];
+        assert!(
+            TestOnlyEmdCheckpoint::load(&path, &points, 2, &weights, &incompatible_ground, 2)
+                .is_err()
+        );
+        std::fs::remove_file(path).expect("remove checkpoint");
     }
 
     #[test]
