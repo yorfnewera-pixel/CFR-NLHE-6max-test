@@ -3547,6 +3547,98 @@ mod tests {
         assert_eq!(repeated_state, Some((16, 17)));
     }
 
+    /// Изолированное расследование траектории flop для `ranks=6, K=20`.
+    ///
+    /// Probe намеренно воспроизводит весь зависимый префикс, но не вызывает
+    /// launcher и не записывает таблицы. Сверяет контрольные 10 итераций;
+    /// continuation допустим только через отдельный test-only stepper,
+    /// чтобы не пересчитывать этот префикс повторно в пределах одного лимита.
+    #[test]
+    #[ignore = "ручная test-only сверка flop-контроля; запускать с --ignored --nocapture под timeout 300 с"]
+    fn test_only_ranks6_flop_k20_reproduces_ten_iteration_control() {
+        const K: usize = 20;
+        const SEED: u64 = 202_610_050_003;
+        const CONTROL_FLOP_OBJECTIVES: [f64; 10] = [
+            0.052_218_402_081_649_31,
+            0.048_975_848_067_693_31,
+            0.047_125_931_493_033_9,
+            0.045_908_284_084_046_23,
+            0.044_481_157_472_547_085,
+            0.043_480_023_156_214_17,
+            0.042_986_778_310_103_405,
+            0.043_031_078_124_860_24,
+            0.043_051_403_845_207_614,
+            0.043_068_505_771_261_47,
+        ];
+        const CONTROL_FINAL_OBJECTIVE: f64 = 0.043_054_945;
+        const CONTROL_CHANGED_WEIGHT: f64 = 0.005_881_799;
+
+        let deck = deck(6);
+        let river = RiverTable::build(&deck);
+        let river_clusters = kmeans(&river.equity, 1, &river.weight, K, SEED, 10);
+        let river_ground = equity_ground(&river_clusters.centroids);
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, K);
+        let turn_clusters = kmeans_wasserstein_1d_with_diagnostics(
+            &turn.distribution,
+            &turn.weight,
+            &river_clusters.centroids,
+            K,
+            SEED,
+            50,
+            true,
+        );
+        assert_eq!(turn_clusters.diagnostics.len(), 21);
+        assert_eq!(
+            turn_clusters
+                .final_assignment_diagnostic
+                .as_ref()
+                .expect("requested final turn diagnostic")
+                .changed_weight_fraction,
+            0.0
+        );
+        let turn_ground = centroid_emd_matrix(&turn_clusters.centroids, K, &river_ground)
+            .expect("valid reproduced turn ground matrix");
+        let flop = PotentialFeatures::build(&deck, 3, &turn.keys, &turn_clusters.assignment, K);
+
+        let ten_iterations = kmeans_emd_with_diagnostics(
+            &flop.distribution,
+            K,
+            &flop.weight,
+            &turn_ground,
+            K,
+            SEED,
+            10,
+            None,
+            true,
+        )
+        .expect("valid reproduced 10-iteration flop clustering");
+        assert_eq!(
+            ten_iterations.objective.len(),
+            CONTROL_FLOP_OBJECTIVES.len()
+        );
+        for (iteration, (&actual, &expected)) in ten_iterations
+            .objective
+            .iter()
+            .zip(CONTROL_FLOP_OBJECTIVES.iter())
+            .enumerate()
+        {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "control mismatch at flop iteration {}: actual={actual:.15}, expected={expected:.15}",
+                iteration + 1,
+            );
+        }
+        let ten_diagnostic = ten_iterations
+            .final_assignment_diagnostic
+            .expect("requested final flop diagnostic");
+        assert!((ten_diagnostic.objective - CONTROL_FINAL_OBJECTIVE).abs() < 1e-8);
+        assert!((ten_diagnostic.changed_weight_fraction - CONTROL_CHANGED_WEIGHT).abs() < 1e-8);
+        println!(
+            "flop-trajectory control iterations=10 final_objective={:.9} changed_weight_fraction={:.9}",
+            ten_diagnostic.objective, ten_diagnostic.changed_weight_fraction,
+        );
+    }
+
     #[test]
     fn centroid_emd_matrix_uses_lower_street_metric() {
         let lower = vec![0.0, 2.0, 2.0, 0.0];
