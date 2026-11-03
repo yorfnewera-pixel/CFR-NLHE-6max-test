@@ -2169,6 +2169,24 @@ mod tests {
     use super::*;
 
     const TEST_ONLY_R7_TURN_REPLAY_LIMIT: usize = 28;
+    const TEST_ONLY_R7_TURN_CONTINUATION_LIMIT: usize = 50;
+
+    fn test_only_ranks7_continuation_iterations(
+        checkpoint_iteration: usize,
+        final_iteration: usize,
+    ) -> Result<std::ops::RangeInclusive<usize>, String> {
+        if checkpoint_iteration != TEST_ONLY_R7_TURN_REPLAY_LIMIT {
+            return Err(format!(
+                "continuation требует checkpoint шага {TEST_ONLY_R7_TURN_REPLAY_LIMIT}, получен шаг {checkpoint_iteration}"
+            ));
+        }
+        if final_iteration != TEST_ONLY_R7_TURN_CONTINUATION_LIMIT {
+            return Err(format!(
+                "continuation ограничен шагом {TEST_ONLY_R7_TURN_CONTINUATION_LIMIT}, запрошен шаг {final_iteration}"
+            ));
+        }
+        Ok(checkpoint_iteration + 1..=final_iteration)
+    }
 
     fn cards(text: &str) -> Vec<u8> {
         text.split_whitespace().map(parse_card).collect()
@@ -5268,6 +5286,130 @@ mod tests {
         trace.flush().expect("flush probe completion");
     }
 
+    #[test]
+    #[ignore = "ручной test-only continuation checkpoint-28 до шага 50; запускать с --ignored --exact --nocapture под общим timeout 300 с"]
+    fn test_only_ranks7_turn_k10_continues_after_verified_step_28_only() {
+        use std::io::Write;
+
+        const K: usize = 10;
+        const SEED: u64 = 202_610_050_003;
+        const EXPECTED_STEP_28_OBJECTIVE: f64 = 0.062_617_997_221_022_24;
+        const EXPECTED_STEP_28_CHANGED_WEIGHT_FRACTION: f64 = 0.000_019_111_323_459_15;
+
+        let checkpoint_path = std::path::PathBuf::from(
+            std::env::var("HU20_R7_TURN_CONTINUATION_CHECKPOINT_PATH")
+                .expect("HU20_R7_TURN_CONTINUATION_CHECKPOINT_PATH is required"),
+        );
+        let trace_path = std::path::PathBuf::from(
+            std::env::var("HU20_R7_TURN_PROBE_TRACE_PATH")
+                .expect("HU20_R7_TURN_PROBE_TRACE_PATH is required"),
+        );
+        let checkpoint_directory = std::path::PathBuf::from(
+            std::env::var("HU20_R7_TURN_PROBE_CHECKPOINT_DIR")
+                .expect("HU20_R7_TURN_PROBE_CHECKPOINT_DIR is required"),
+        );
+        assert!(checkpoint_path.is_file(), "checkpoint-28 must exist");
+        assert!(
+            checkpoint_directory.is_dir(),
+            "checkpoint directory must exist"
+        );
+        assert!(
+            std::fs::read_dir(&checkpoint_directory)
+                .expect("read checkpoint directory")
+                .next()
+                .is_none(),
+            "checkpoint directory must be empty"
+        );
+        assert!(!trace_path.exists(), "trace path must be new");
+        let mut trace = std::fs::File::create(trace_path).expect("create turn trace");
+
+        let deck = deck(7);
+        let river = RiverTable::build(&deck);
+        let river_clusters = kmeans(&river.equity, 1, &river.weight, K, SEED, 10);
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, K);
+        let mut stepper = test_only_resume_wasserstein_from_checkpoint(
+            &checkpoint_path,
+            &turn.distribution,
+            &turn.weight,
+            &river_clusters.centroids,
+            K,
+        )
+        .expect("load verified checkpoint-28");
+        assert_eq!(stepper.diagnostics.len(), TEST_ONLY_R7_TURN_REPLAY_LIMIT);
+        assert_eq!(stepper.objective.len(), TEST_ONLY_R7_TURN_REPLAY_LIMIT);
+        let state_before_initial_diagnostic = stepper.state_words();
+        let initial_diagnostic = stepper.final_assignment_diagnostic();
+        assert_eq!(state_before_initial_diagnostic, stepper.state_words());
+        assert_eq!(initial_diagnostic.objective, EXPECTED_STEP_28_OBJECTIVE);
+        assert_eq!(
+            initial_diagnostic.changed_weight_fraction,
+            EXPECTED_STEP_28_CHANGED_WEIGHT_FRACTION
+        );
+        writeln!(
+            trace,
+            "initial iteration=28 objective={:.17} changed_weight_fraction={:.17}",
+            initial_diagnostic.objective, initial_diagnostic.changed_weight_fraction,
+        )
+        .expect("write initial diagnostic");
+
+        let mut seen = std::collections::HashMap::new();
+        assert_eq!(seen.insert(stepper.state_words(), 28), None);
+        let mut repeated_state = None;
+        for iteration in
+            test_only_ranks7_continuation_iterations(28, 50).expect("fixed continuation window")
+        {
+            let diagnostic = stepper
+                .step_without_early_stop()
+                .expect("continuation step must return a diagnostic");
+            if repeated_state.is_none() {
+                repeated_state = test_only_wasserstein_record_step(
+                    &mut trace,
+                    &mut seen,
+                    iteration,
+                    &stepper,
+                    &diagnostic,
+                );
+            } else {
+                let _ = test_only_wasserstein_record_step(
+                    &mut trace,
+                    &mut seen,
+                    iteration,
+                    &stepper,
+                    &diagnostic,
+                );
+            }
+            let state_before_diagnostic = stepper.state_words();
+            let final_diagnostic = stepper.final_assignment_diagnostic();
+            assert_eq!(state_before_diagnostic, stepper.state_words());
+            writeln!(
+                trace,
+                "final iteration={iteration} objective={:.17} changed_weight_fraction={:.17}",
+                final_diagnostic.objective, final_diagnostic.changed_weight_fraction,
+            )
+            .expect("write final diagnostic");
+            trace.flush().expect("flush final diagnostic");
+            test_only_write_wasserstein_checkpoint(&checkpoint_directory, iteration, &stepper);
+        }
+        assert_eq!(
+            stepper.diagnostics.len(),
+            TEST_ONLY_R7_TURN_CONTINUATION_LIMIT
+        );
+        match repeated_state {
+            Some((first_seen_at, repeated_at)) => writeln!(
+                trace,
+                "complete iterations={} terminal_reason=continuation-step-50 repeated_state={first_seen_at}->{repeated_at}",
+                stepper.diagnostics.len(),
+            ),
+            None => writeln!(
+                trace,
+                "complete iterations={} terminal_reason=continuation-step-50 repeated_state=none",
+                stepper.diagnostics.len(),
+            ),
+        }
+        .expect("write continuation completion");
+        trace.flush().expect("flush continuation completion");
+    }
+
     /// Одноразовый test-only probe для контроля `ranks=5, K=20`.
     ///
     /// Не вызывается production-кодом и не меняет сохраняемые таблицы: повторно
@@ -5968,6 +6110,16 @@ mod tests {
     fn test_only_ranks7_replay_limit_excludes_continuation() {
         assert_eq!(TEST_ONLY_R7_TURN_REPLAY_LIMIT, 28);
         assert!(TEST_ONLY_R7_TURN_REPLAY_LIMIT < 29);
+    }
+
+    #[test]
+    fn test_only_ranks7_continuation_window_is_strictly_29_to_50() {
+        assert_eq!(
+            test_only_ranks7_continuation_iterations(28, 50),
+            Ok(29..=50)
+        );
+        assert!(test_only_ranks7_continuation_iterations(27, 50).is_err());
+        assert!(test_only_ranks7_continuation_iterations(28, 51).is_err());
     }
 
     #[test]
