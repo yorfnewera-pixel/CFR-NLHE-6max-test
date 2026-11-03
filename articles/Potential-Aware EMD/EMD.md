@@ -354,6 +354,20 @@ seed, общим `iterations=10`, `turn_iterations=50`, двумя потока�
 менялись. Генератор и тяжёлые probe в этой задаче не запускались; production
 контроль с flop budget 30 требует отдельного согласования.
 
+### Production-контроль flop budget 30
+
+Согласованный launcher-контроль `ranks=6`, `K=20`, turn budget 50 и flop
+budget 30 завершился штатно: exit code `0`, status `complete`, три таблицы и
+`summary.json` созданы, EMD failure-dump отсутствует. Flop достиг штатной
+ранней остановки на шаге 24; final reassignment имеет фактическую нулевую
+смену веса и objective `0.042501379`. River и turn hashes совпали с прежним
+контролем с flop budget 10; flop hash зафиксирован отдельно. Полная сводка:
+`web_reports/potential-emd-r6-k20-turn50-flop30-control-20261103.md`.
+
+Встроенный `code_revision` в summary равен `unknown`, поэтому commit запуска
+не утверждается по этому полю. Этот контроль проверяет production-путь, но не
+воспроизводимость; следующий запуск не выполняется без отдельного решения.
+
 ### Continuation checkpoint-20: согласованность на шаге 24
 
 Из `checkpoint-20.bin` выполнен ровно один test-only continuation с максимумом
