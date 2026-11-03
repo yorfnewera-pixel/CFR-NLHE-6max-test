@@ -2251,6 +2251,23 @@ mod tests {
         Ok(checkpoint_iteration + 1..=final_iteration)
     }
 
+    fn test_only_ranks7_flop_continuation_iterations(
+        checkpoint_iteration: usize,
+        final_iteration: usize,
+    ) -> Result<std::ops::RangeInclusive<usize>, String> {
+        if checkpoint_iteration != 30 {
+            return Err(format!(
+                "flop continuation требует checkpoint шага 30, получен шаг {checkpoint_iteration}"
+            ));
+        }
+        if final_iteration != 50 {
+            return Err(format!(
+                "flop continuation ограничен шагом 50, запрошен шаг {final_iteration}"
+            ));
+        }
+        Ok(checkpoint_iteration + 1..=final_iteration)
+    }
+
     fn test_only_roundtrip_decimal(value: f64) -> String {
         format!("{value:?}")
     }
@@ -6521,6 +6538,130 @@ mod tests {
             final_diagnostic.changed_weight_fraction,
             captured.input_fingerprint,
         );
+    }
+
+    #[test]
+    #[ignore = "ручной test-only continuation flop R7/K10 из checkpoint-30 только до шага 50"]
+    fn test_only_ranks7_flop_k10_continues_checkpoint_thirty_to_fifty() {
+        use std::io::Write;
+
+        const K: usize = 10;
+        const INPUT_FINGERPRINT: u64 = 0x45E6_F95C_08AB_346B;
+        let checkpoint_path = std::path::PathBuf::from(
+            std::env::var("HU20_R7_FLOP_CONTINUATION_CHECKPOINT_PATH")
+                .expect("HU20_R7_FLOP_CONTINUATION_CHECKPOINT_PATH is required"),
+        );
+        let checkpoint_directory = std::path::PathBuf::from(
+            std::env::var("HU20_R7_FLOP_CONTINUATION_CHECKPOINT_DIR")
+                .expect("HU20_R7_FLOP_CONTINUATION_CHECKPOINT_DIR is required"),
+        );
+        let trace_path = std::path::PathBuf::from(
+            std::env::var("HU20_R7_FLOP_CONTINUATION_TRACE_PATH")
+                .expect("HU20_R7_FLOP_CONTINUATION_TRACE_PATH is required"),
+        );
+        assert!(checkpoint_path.is_file(), "checkpoint-30 must exist");
+        assert!(
+            checkpoint_directory.is_dir(),
+            "checkpoint directory must exist"
+        );
+        assert!(
+            std::fs::read_dir(&checkpoint_directory)
+                .expect("read checkpoint directory")
+                .next()
+                .is_none(),
+            "checkpoint directory must be empty"
+        );
+        assert!(!trace_path.exists(), "trace path must be new");
+
+        let captured = TestOnlyEmdCaptureCheckpoint::load(&checkpoint_path)
+            .expect("load verified complete checkpoint-30");
+        assert_eq!(captured.input_fingerprint, INPUT_FINGERPRINT);
+        assert_eq!(captured.weight.len(), 48_769);
+        assert_eq!(captured.points.len(), captured.weight.len() * K);
+        assert_eq!(captured.ground.len(), K * K);
+        assert_eq!(captured.snapshot.objective.len(), 30);
+        assert_eq!(captured.snapshot.diagnostics.len(), 30);
+        assert!(!captured.snapshot.stabilized);
+        let mut stepper = TestOnlyEmdStepper::from_snapshot(
+            &captured.points,
+            K,
+            &captured.weight,
+            &captured.ground,
+            K,
+            captured.snapshot,
+        );
+        assert_eq!(stepper.diagnostics.len(), 30);
+        let mut trace = std::fs::File::create(&trace_path).expect("create continuation trace");
+        writeln!(
+            trace,
+            "initial iteration=30 input_fingerprint={INPUT_FINGERPRINT:016X} objective={:.17}",
+            *stepper.objective.last().expect("step-30 objective"),
+        )
+        .expect("write continuation preflight");
+        trace.flush().expect("flush continuation preflight");
+
+        let mut seen = std::collections::HashMap::new();
+        assert_eq!(seen.insert(stepper.state_words(), 30), None);
+        let mut repeated_state = None;
+        let mut first_zero_state: Option<(usize, Vec<u32>)> = None;
+        let mut zero_state_repeated = None;
+        let mut objective_growths = Vec::new();
+        for iteration in test_only_ranks7_flop_continuation_iterations(30, 50)
+            .expect("fixed continuation window")
+        {
+            let diagnostic = stepper
+                .step_without_early_stop()
+                .expect("valid continuation step")
+                .expect("continuation step must return a diagnostic");
+            if diagnostic.objective_after_update > diagnostic.objective_before_update {
+                objective_growths.push(iteration);
+            }
+            let state = stepper.state_words();
+            if let Some((zero_iteration, zero_state)) = &first_zero_state {
+                if zero_state_repeated.is_none() && *zero_state == state {
+                    zero_state_repeated = Some((*zero_iteration, iteration));
+                }
+            }
+            if repeated_state.is_none() {
+                repeated_state = seen
+                    .insert(state.clone(), iteration)
+                    .map(|first| (first, iteration));
+            } else {
+                seen.insert(state.clone(), iteration);
+            }
+            let state_before_diagnostic = stepper.state_words();
+            let final_diagnostic = stepper
+                .final_assignment_diagnostic()
+                .expect("valid final assignment diagnostic");
+            assert_eq!(state_before_diagnostic, stepper.state_words());
+            if first_zero_state.is_none() && final_diagnostic.changed_weight_fraction == 0.0 {
+                first_zero_state = Some((iteration, state));
+            }
+            writeln!(
+                trace,
+                "iteration={iteration} objective_before={:.17} objective_after={:.17} moved_weight_fraction={:.17} final_objective={:.17} final_changed_weight_fraction={:.17}",
+                diagnostic.objective_before_update,
+                diagnostic.objective_after_update,
+                diagnostic.moved_weight_fraction,
+                final_diagnostic.objective,
+                final_diagnostic.changed_weight_fraction,
+            )
+            .expect("write continuation iteration");
+            trace.flush().expect("flush continuation iteration");
+            TestOnlyEmdCaptureCheckpoint::write_atomic(
+                &checkpoint_directory.join(format!("checkpoint-{iteration:02}.bin")),
+                &stepper,
+            )
+            .expect("write continuation checkpoint");
+        }
+        assert_eq!(stepper.diagnostics.len(), 50);
+        writeln!(
+            trace,
+            "complete iterations=50 repeated_state={repeated_state:?} first_zero_state={} zero_state_repeated={zero_state_repeated:?} objective_growths={objective_growths:?}",
+            first_zero_state.map(|(iteration, _)| iteration).map_or_else(|| "none".to_owned(), |iteration| iteration.to_string()),
+        )
+        .expect("write continuation completion");
+        trace.flush().expect("flush continuation completion");
     }
 
     #[test]
