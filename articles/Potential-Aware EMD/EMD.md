@@ -767,3 +767,17 @@ R6/K20, а turn checkpoint R7/K10 относится к другой улице 
 иначе это был бы replay с нуля. Предложен отдельный capture-only шаг с
 точной сверкой 1–30 и сохранением checkpoint-30; он не запускался. Детали:
 `web_reports/potential-emd-r7-k10-flop-step30-continuation-preflight-20261103.md`.
+
+### Test-only capture flop R7/K10 до шага 30
+
+После отдельного согласования выполнен ровно один supervised capture-only
+run на commit `3d6bc352df7f91cd87eb2a17a8875571e0ac45e9`. Он восстановил
+необходимый river/turn-префикс с новым gate и flop 1–30, но не выполнил шаг
+31. River objectives 1–10, turn 1–29 (включая signed-zero согласованность
+шага 29) и flop objectives 1–30 побитово совпали с полным baseline
+gate-control. Атомарный `checkpoint-30.bin` содержит точные flop-входы,
+`turn_ground`, fingerprint, assignments, центры, RNG и diagnostics; загрузка
+прошла с точным round-trip state без нового шага. Это не утверждает
+побитовое совпадение полного состояния с историческим production-запуском,
+поскольку исторического checkpoint нет. Continuation 31–50 не выполнялся.
+Детали: `web_reports/potential-emd-r7-k10-flop-step30-capture-20261103.md`.
