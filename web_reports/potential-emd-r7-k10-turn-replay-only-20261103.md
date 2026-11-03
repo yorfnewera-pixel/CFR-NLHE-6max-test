@@ -80,3 +80,35 @@ Ignored-test не запускался: trace, stdout/stderr, checkpoint и ег
 не выполнялась. До нового отдельного согласования runner должен заменить
 проверку массива на булеву проверку наличия хотя бы одной совпавшей строки и
 получить малый тест для multi-line discovery-вывода.
+
+## Runner verification без replay
+
+Discovery исправлен без изменения stepper, production-кода, production
+launcher, допусков или numerical gates. Проверка отдельно отклоняет ненулевой
+код Cargo, нормализует CRLF/LF в строки и требует хотя бы одну строку,
+в точности равную полному имени test с суффиксом `: test`.
+
+Малый PowerShell-тест покрывает нужный test среди заголовков и сводки,
+похожие имена, пустой вывод, ненулевой exit code и CRLF/LF. Он прошёл вместе
+с parser-проверкой скриптов. Обычный Rust suite: `70` passed, `0` failed,
+`9` ignored; `cargo fmt --check` и `git diff --check` успешны.
+
+Тот же runner был безопасно вызван без вычислительной ветки:
+
+```powershell
+pwsh -NoProfile -File .\native\hu20-buckets\scripts\run-r7-turn-replay-only.ps1 -OutputDirectory .\native\hu20-buckets\results\test-only-r7-turn-k10-replay-only-verify-only-20261103 -TimeoutSeconds 300 -VerifyOnly
+```
+
+Рабочий каталог shell: `C:\Users\Cassmall\Desktop\CFR-NLHE-6max-test`.
+Runner сохранил абсолютный manifest
+`C:\Users\Cassmall\Desktop\CFR-NLHE-6max-test\native\hu20-buckets\Cargo.toml`.
+Release build и discovery завершились с кодом `0`; discovery нашёл ровно:
+
+```text
+tests::test_only_ranks7_turn_k10_replays_verified_step_28_only: test
+```
+
+`verify_only_complete=true`. Supervised replay не вызывался, `turn-trace.log`
+и checkpoint не созданы, процессов `hu20-buckets` нет. HEAD:
+`5aaec75a53397193c5cc0370c5fc75f0ca617a58`. Новый вычислительный запуск
+требует отдельного согласования.

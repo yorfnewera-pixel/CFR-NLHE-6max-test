@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $OutputDirectory,
-    [ValidateRange(1, 86400)] [int] $TimeoutSeconds = 300
+    [ValidateRange(1, 86400)] [int] $TimeoutSeconds = 300,
+    [switch] $VerifyOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,6 +34,7 @@ $context = Join-Path $output 'launcher-context.txt'
     "continuation=false"
     "flop=false"
     "production_tables=false"
+    "verify_only=$VerifyOnly"
     "manifest_path=$($cargoCommand.ManifestPath)"
     "test=$($cargoCommand.TestName)"
     "replay_arguments=$($cargoCommand.ReplayArguments)"
@@ -41,13 +43,23 @@ $context = Join-Path $output 'launcher-context.txt'
 Push-Location $project
 try {
     & cargo.exe test --manifest-path $cargoCommand.ManifestPath --release --no-run
-    if ($LASTEXITCODE -ne 0) { throw "Release test build failed with code $LASTEXITCODE." }
+    $buildExitCode = $LASTEXITCODE
+    "release_build_exit_code=$buildExitCode" | Add-Content -LiteralPath $context -Encoding utf8
+    if ($buildExitCode -ne 0) { throw "Release test build failed with code $buildExitCode." }
     $discovery = & cargo.exe test --manifest-path $cargoCommand.ManifestPath --release $cargoCommand.TestName -- --list 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "Replay test discovery failed with code $LASTEXITCODE." }
-    if ($discovery -notmatch [regex]::Escape($cargoCommand.TestName)) {
+    $discoveryExitCode = $LASTEXITCODE
+    "discovery_exit_code=$discoveryExitCode" | Add-Content -LiteralPath $context -Encoding utf8
+    $discoveryLines = @($discovery | ForEach-Object { $_.ToString() })
+    $discoveryLines | Set-Content -LiteralPath (Join-Path $output 'test-discovery.log') -Encoding utf8
+    if ($discoveryExitCode -ne 0) { throw "Replay test discovery failed with code $discoveryExitCode." }
+    if (-not (Test-R7TurnReplayDiscovery -CargoExitCode $discoveryExitCode -OutputLines $discoveryLines -TestName $cargoCommand.TestName)) {
         throw "Replay test discovery did not find $($cargoCommand.TestName)."
     }
-    $discovery | Set-Content -LiteralPath (Join-Path $output 'test-discovery.log') -Encoding utf8
+    "discovery_found=true" | Add-Content -LiteralPath $context -Encoding utf8
+    if ($VerifyOnly) {
+        "verify_only_complete=true" | Add-Content -LiteralPath $context -Encoding utf8
+        return
+    }
     $previousThreads = $env:RAYON_NUM_THREADS
     $previousTrace = $env:HU20_R7_TURN_PROBE_TRACE_PATH
     $previousCheckpoints = $env:HU20_R7_TURN_PROBE_CHECKPOINT_DIR

@@ -14,3 +14,22 @@ function Get-R7TurnReplayCargoCommand {
         ReplayArguments = "test --manifest-path $quotedManifest --release $testName -- --ignored --exact --nocapture"
     }
 }
+
+function Test-R7TurnReplayDiscovery {
+    param(
+        [Parameter(Mandatory)] [int] $CargoExitCode,
+        [AllowEmptyString()] [string[]] $OutputLines,
+        [Parameter(Mandatory)] [string] $TestName
+    )
+
+    if ($CargoExitCode -ne 0) {
+        return $false
+    }
+    $expectedLine = "tests::${TestName}: test"
+    $normalizedLines = @(
+        $OutputLines |
+            ForEach-Object { $_ -split "`r?`n" } |
+            ForEach-Object { $_.Trim() }
+    )
+    return @($normalizedLines | Where-Object { $_ -ceq $expectedLine }).Count -gt 0
+}
