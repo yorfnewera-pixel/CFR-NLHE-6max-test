@@ -3750,6 +3750,189 @@ mod tests {
         }
     }
 
+    struct TestOnlyEmdCaptureCheckpoint;
+
+    struct TestOnlyEmdCaptureSnapshot {
+        points: Vec<f32>,
+        weight: Vec<u64>,
+        ground: Vec<f32>,
+        input_fingerprint: u64,
+        snapshot: TestOnlyEmdStepperSnapshot,
+    }
+
+    impl TestOnlyEmdCaptureCheckpoint {
+        const MAGIC: [u8; 8] = *b"HU20CP02";
+
+        fn write_atomic(
+            path: &std::path::Path,
+            stepper: &TestOnlyEmdStepper<'_>,
+        ) -> std::io::Result<()> {
+            let mut bytes = Vec::new();
+            let input_fingerprint = test_only_input_fingerprint(
+                stepper.points,
+                stepper.dim,
+                stepper.weight,
+                stepper.ground,
+                stepper.k,
+            );
+            bytes.extend_from_slice(&Self::MAGIC);
+            for value in [
+                stepper.dim as u64,
+                stepper.k as u64,
+                stepper.weight.len() as u64,
+                input_fingerprint,
+                stepper.diagnostics.len() as u64,
+                stepper.rng.0,
+            ] {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            bytes.push(u8::from(stepper.stabilized));
+            TestOnlyEmdCheckpoint::write_f32s(&mut bytes, stepper.points);
+            Self::write_u64s(&mut bytes, stepper.weight);
+            TestOnlyEmdCheckpoint::write_f32s(&mut bytes, stepper.ground);
+            TestOnlyEmdCheckpoint::write_u16s(&mut bytes, &stepper.assignment);
+            TestOnlyEmdCheckpoint::write_f32s(&mut bytes, &stepper.centroids);
+            TestOnlyEmdCheckpoint::write_f64s(&mut bytes, &stepper.objective);
+            bytes.extend_from_slice(&(stepper.diagnostics.len() as u64).to_le_bytes());
+            for diagnostic in &stepper.diagnostics {
+                bytes
+                    .extend_from_slice(&diagnostic.objective_before_update.to_bits().to_le_bytes());
+                bytes.extend_from_slice(&diagnostic.objective_after_update.to_bits().to_le_bytes());
+                match diagnostic.objective_after_reassignment {
+                    Some(value) => {
+                        bytes.push(1);
+                        bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+                    }
+                    None => bytes.push(0),
+                }
+                bytes.extend_from_slice(&diagnostic.moved_weight_fraction.to_bits().to_le_bytes());
+                bytes.extend_from_slice(&(diagnostic.occupied_buckets as u64).to_le_bytes());
+            }
+            let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+            if temporary.exists() {
+                std::fs::remove_file(&temporary)?;
+            }
+            std::fs::write(&temporary, bytes)?;
+            match std::fs::rename(&temporary, path) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    let _ = std::fs::remove_file(&temporary);
+                    Err(error)
+                }
+            }
+        }
+
+        fn load(path: &std::path::Path) -> Result<TestOnlyEmdCaptureSnapshot, String> {
+            let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+            let mut offset = 0usize;
+            if TestOnlyEmdCheckpoint::read_bytes(&bytes, &mut offset, 8)? != Self::MAGIC {
+                return Err("неверный magic capture checkpoint".to_owned());
+            }
+            let dim = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            let k = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            let point_count = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            let input_fingerprint = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?;
+            let iterations = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            let rng_state = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?;
+            let stabilized = match TestOnlyEmdCheckpoint::read_u8(&bytes, &mut offset)? {
+                0 => false,
+                1 => true,
+                _ => return Err("некорректный флаг стабилизации capture checkpoint".to_owned()),
+            };
+            let points = TestOnlyEmdCheckpoint::read_f32s(&bytes, &mut offset)?;
+            let weight = Self::read_u64s(&bytes, &mut offset)?;
+            let ground = TestOnlyEmdCheckpoint::read_f32s(&bytes, &mut offset)?;
+            if points.len() != point_count * dim
+                || weight.len() != point_count
+                || ground.len() != dim * dim
+                || test_only_input_fingerprint(&points, dim, &weight, &ground, k)
+                    != input_fingerprint
+            {
+                return Err("capture checkpoint несовместим с точными входами".to_owned());
+            }
+            let assignment = TestOnlyEmdCheckpoint::read_u16s(&bytes, &mut offset)?;
+            let centroids = TestOnlyEmdCheckpoint::read_f32s(&bytes, &mut offset)?;
+            let objective = TestOnlyEmdCheckpoint::read_f64s(&bytes, &mut offset)?;
+            let diagnostics_len = TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+            if assignment.len() != point_count
+                || centroids.len() != k * dim
+                || objective.len() != iterations
+                || diagnostics_len != iterations
+            {
+                return Err("capture checkpoint содержит несовместимые длины состояния".to_owned());
+            }
+            let mut diagnostics = Vec::with_capacity(diagnostics_len);
+            for _ in 0..diagnostics_len {
+                let objective_before_update =
+                    f64::from_bits(TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?);
+                let objective_after_update =
+                    f64::from_bits(TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?);
+                let objective_after_reassignment =
+                    match TestOnlyEmdCheckpoint::read_u8(&bytes, &mut offset)? {
+                        0 => None,
+                        1 => Some(f64::from_bits(TestOnlyEmdCheckpoint::read_u64(
+                            &bytes,
+                            &mut offset,
+                        )?)),
+                        _ => {
+                            return Err(
+                                "некорректный флаг reassignment capture checkpoint".to_owned()
+                            )
+                        }
+                    };
+                let moved_weight_fraction =
+                    f64::from_bits(TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)?);
+                let occupied_buckets =
+                    TestOnlyEmdCheckpoint::read_u64(&bytes, &mut offset)? as usize;
+                diagnostics.push(TestOnlyEmdIteration {
+                    objective_before_update,
+                    objective_after_update,
+                    objective_after_reassignment,
+                    moved_weight_fraction,
+                    occupied_buckets,
+                });
+            }
+            if offset != bytes.len() {
+                return Err("лишние байты в capture checkpoint".to_owned());
+            }
+            Ok(TestOnlyEmdCaptureSnapshot {
+                points,
+                weight,
+                ground,
+                input_fingerprint,
+                snapshot: TestOnlyEmdStepperSnapshot {
+                    assignment,
+                    centroids,
+                    rng_state,
+                    objective,
+                    diagnostics,
+                    stabilized,
+                },
+            })
+        }
+
+        fn write_u64s(bytes: &mut Vec<u8>, values: &[u64]) {
+            bytes.extend_from_slice(&(values.len() as u64).to_le_bytes());
+            for &value in values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+
+        fn read_u64s(bytes: &[u8], offset: &mut usize) -> Result<Vec<u64>, String> {
+            let len = TestOnlyEmdCheckpoint::read_u64(bytes, offset)? as usize;
+            let raw = TestOnlyEmdCheckpoint::read_bytes(
+                bytes,
+                offset,
+                len.checked_mul(8)
+                    .ok_or("переполнение capture checkpoint")?,
+            )?;
+            Ok(raw
+                .chunks_exact(8)
+                .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
+                .collect())
+        }
+    }
+
     struct TestOnlyWasserstein1dCheckpoint;
 
     impl TestOnlyWasserstein1dCheckpoint {
@@ -6155,6 +6338,189 @@ mod tests {
         )
         .expect("write final resume diagnostic");
         trace.flush().expect("flush final resume diagnostic");
+    }
+
+    #[test]
+    #[ignore = "ручной test-only capture flop R7/K10 до шага 30; continuation запрещён"]
+    fn test_only_ranks7_flop_k10_captures_step_thirty() {
+        const K: usize = 10;
+        const SEED: u64 = 202_610_050_003;
+        const RIVER_OBJECTIVES: [f64; 10] = [
+            0.03163311206365799,
+            0.02943193876604876,
+            0.028953339664462258,
+            0.02816793423830877,
+            0.027766050155977804,
+            0.0276195574961869,
+            0.027465010425814375,
+            0.02735575691035052,
+            0.027230250105942537,
+            0.027165331039108183,
+        ];
+        const TURN_OBJECTIVES: [f64; 29] = [
+            0.09387810753124796,
+            0.06961909461998657,
+            0.066461444756355,
+            0.0658355690597573,
+            0.06499376114405438,
+            0.06421925630805495,
+            0.06389030774559461,
+            0.06395684149919564,
+            0.06392052824529727,
+            0.06386184613370118,
+            0.063772262941226,
+            0.06361977316190826,
+            0.06355734715534334,
+            0.06354117561232213,
+            0.06344304693959009,
+            0.06332710212150726,
+            0.06321740035686403,
+            0.06306319348068187,
+            0.06296636804030313,
+            0.06288744818335266,
+            0.06276399803831799,
+            0.06264121420566213,
+            0.06261773693963193,
+            0.0626199135590203,
+            0.06262792724983941,
+            0.06262393411555754,
+            0.06261729621107956,
+            0.06261840646662956,
+            0.06261799722102224,
+        ];
+        const FLOP_OBJECTIVES: [f64; 30] = [
+            0.06390741888786589,
+            0.05264972352672946,
+            0.05054380009511822,
+            0.05010416788433777,
+            0.04970582604324873,
+            0.04931192317391538,
+            0.049173631214460535,
+            0.04903078488809977,
+            0.04874950780915335,
+            0.048613558119188695,
+            0.04850561907420168,
+            0.04838619998288157,
+            0.04830602283333495,
+            0.048259785063083385,
+            0.048183746123441,
+            0.04814356295744527,
+            0.04811727285018781,
+            0.048106201867943295,
+            0.04806934676132338,
+            0.04807411832017309,
+            0.047845070617985874,
+            0.047643059489864394,
+            0.04743037702841324,
+            0.04722833135221942,
+            0.04699765936717146,
+            0.04671659907529272,
+            0.04649843807702548,
+            0.04641957166706851,
+            0.04643477203305485,
+            0.04644749949229097,
+        ];
+        let checkpoint_path = std::path::PathBuf::from(
+            std::env::var("HU20_R7_FLOP_CAPTURE_CHECKPOINT_PATH")
+                .expect("HU20_R7_FLOP_CAPTURE_CHECKPOINT_PATH is required"),
+        );
+        assert!(!checkpoint_path.exists(), "checkpoint-30 must not exist");
+
+        let deck = deck(7);
+        let river = RiverTable::build(&deck);
+        let river_clusters = kmeans(&river.equity, 1, &river.weight, K, SEED, 10);
+        assert_eq!(river_clusters.objective, RIVER_OBJECTIVES);
+        let river_ground = equity_ground(&river_clusters.centroids);
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, K);
+        let turn_clusters = kmeans_wasserstein_1d_with_diagnostics(
+            &turn.distribution,
+            &turn.weight,
+            &river_clusters.centroids,
+            K,
+            SEED,
+            50,
+            true,
+        );
+        assert_eq!(turn_clusters.objective, TURN_OBJECTIVES);
+        assert!(matches!(
+            turn_clusters.termination,
+            Some(ClusteringTermination::EarlyStopConsistent)
+        ));
+        assert!(turn_clusters.final_assignment_consistent);
+        assert_eq!(
+            turn_clusters
+                .final_assignment_diagnostic
+                .expect("requested final turn diagnostic")
+                .changed_weight_fraction
+                .to_bits(),
+            (-0.0f64).to_bits()
+        );
+        let turn_ground = centroid_emd_matrix(&turn_clusters.centroids, K, &river_ground)
+            .expect("valid reproduced turn ground matrix");
+        let flop = PotentialFeatures::build(&deck, 3, &turn.keys, &turn_clusters.assignment, K);
+        let mut stepper =
+            TestOnlyEmdStepper::new(&flop.distribution, K, &flop.weight, &turn_ground, K, SEED);
+        for iteration in 1..=30 {
+            stepper
+                .step()
+                .expect("valid flop capture step")
+                .expect("flop must not stabilize before step 30");
+            assert_eq!(
+                stepper.objective[iteration - 1].to_bits(),
+                FLOP_OBJECTIVES[iteration - 1].to_bits()
+            );
+        }
+        let state_before_diagnostic = stepper.state_words();
+        let final_diagnostic = stepper
+            .final_assignment_diagnostic()
+            .expect("valid final flop diagnostic");
+        assert_eq!(state_before_diagnostic, stepper.state_words());
+        assert!(final_diagnostic.changed_weight_fraction > 0.0);
+
+        TestOnlyEmdCaptureCheckpoint::write_atomic(&checkpoint_path, &stepper)
+            .expect("write complete checkpoint-30");
+        let captured = TestOnlyEmdCaptureCheckpoint::load(&checkpoint_path)
+            .expect("load complete checkpoint-30");
+        assert_eq!(captured.points, flop.distribution);
+        assert_eq!(captured.weight, flop.weight);
+        assert_eq!(captured.ground, turn_ground);
+        let resumed = TestOnlyEmdStepper::from_snapshot(
+            &captured.points,
+            K,
+            &captured.weight,
+            &captured.ground,
+            K,
+            captured.snapshot,
+        );
+        assert_eq!(resumed.state_words(), stepper.state_words());
+        assert_eq!(resumed.objective, stepper.objective);
+        assert_eq!(resumed.diagnostics.len(), stepper.diagnostics.len());
+        for (actual, expected) in resumed.diagnostics.iter().zip(&stepper.diagnostics) {
+            assert_eq!(
+                actual.objective_before_update.to_bits(),
+                expected.objective_before_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_update.to_bits(),
+                expected.objective_after_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_reassignment.map(f64::to_bits),
+                expected.objective_after_reassignment.map(f64::to_bits)
+            );
+            assert_eq!(
+                actual.moved_weight_fraction.to_bits(),
+                expected.moved_weight_fraction.to_bits()
+            );
+            assert_eq!(actual.occupied_buckets, expected.occupied_buckets);
+        }
+        assert_eq!(resumed.diagnostics.len(), 30);
+        println!(
+            "r7-flop-capture iterations=30 final_objective={:.9} changed_weight_fraction={:.9} input_fingerprint={:016X}",
+            final_diagnostic.objective,
+            final_diagnostic.changed_weight_fraction,
+            captured.input_fingerprint,
+        );
     }
 
     #[test]
