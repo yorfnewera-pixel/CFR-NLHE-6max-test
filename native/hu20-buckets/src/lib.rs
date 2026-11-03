@@ -2445,6 +2445,297 @@ mod tests {
         InvalidInput,
     }
 
+    #[derive(Clone)]
+    struct TestOnlyEmdStepperSnapshot {
+        assignment: Vec<u16>,
+        centroids: Vec<f32>,
+        rng_state: u64,
+        objective: Vec<f64>,
+        diagnostics: Vec<TestOnlyEmdIteration>,
+        stabilized: bool,
+    }
+
+    #[derive(Clone)]
+    struct TestOnlyEmdIteration {
+        objective_before_update: f64,
+        objective_after_update: f64,
+        objective_after_reassignment: Option<f64>,
+        moved_weight_fraction: f64,
+        occupied_buckets: usize,
+    }
+
+    struct TestOnlyEmdStepper<'a> {
+        points: &'a [f32],
+        dim: usize,
+        weight: &'a [u64],
+        ground: &'a [f32],
+        k: usize,
+        assignment: Vec<u16>,
+        centroids: Vec<f32>,
+        rng: Rng,
+        objective: Vec<f64>,
+        diagnostics: Vec<TestOnlyEmdIteration>,
+        stabilized: bool,
+    }
+
+    impl<'a> TestOnlyEmdStepper<'a> {
+        fn new(
+            points: &'a [f32],
+            dim: usize,
+            weight: &'a [u64],
+            ground: &'a [f32],
+            k: usize,
+            seed: u64,
+        ) -> Self {
+            let n = weight.len();
+            assert!(
+                points.len() == n * dim
+                    && ground.len() == dim * dim
+                    && k <= n
+                    && k <= u16::MAX as usize
+            );
+            let row = |index: usize| &points[index * dim..(index + 1) * dim];
+            let mut rng = Rng(seed);
+            let mut centroids = Vec::with_capacity(k * dim);
+            for _ in 0..k {
+                let index = (rng.next() % n as u64) as usize;
+                centroids.extend_from_slice(row(index));
+            }
+            Self {
+                points,
+                dim,
+                weight,
+                ground,
+                k,
+                assignment: vec![u16::MAX; n],
+                centroids,
+                rng,
+                objective: Vec::new(),
+                diagnostics: Vec::new(),
+                stabilized: false,
+            }
+        }
+
+        fn from_snapshot(
+            points: &'a [f32],
+            dim: usize,
+            weight: &'a [u64],
+            ground: &'a [f32],
+            k: usize,
+            snapshot: TestOnlyEmdStepperSnapshot,
+        ) -> Self {
+            Self {
+                points,
+                dim,
+                weight,
+                ground,
+                k,
+                assignment: snapshot.assignment,
+                centroids: snapshot.centroids,
+                rng: Rng(snapshot.rng_state),
+                objective: snapshot.objective,
+                diagnostics: snapshot.diagnostics,
+                stabilized: snapshot.stabilized,
+            }
+        }
+
+        fn snapshot(&self) -> TestOnlyEmdStepperSnapshot {
+            TestOnlyEmdStepperSnapshot {
+                assignment: self.assignment.clone(),
+                centroids: self.centroids.clone(),
+                rng_state: self.rng.0,
+                objective: self.objective.clone(),
+                diagnostics: self.diagnostics.clone(),
+                stabilized: self.stabilized,
+            }
+        }
+
+        fn step(&mut self) -> Result<Option<TestOnlyEmdIteration>, EmdContextError> {
+            if self.stabilized {
+                return Ok(None);
+            }
+            let n = self.weight.len();
+            let row = |index: usize| &self.points[index * self.dim..(index + 1) * self.dim];
+            let assigned: Vec<(u16, f32)> = (0..n)
+                .into_par_iter()
+                .map(|index| {
+                    let point = row(index);
+                    first_minimum_emd((0..self.k).map(|cluster| {
+                        let centroid =
+                            &self.centroids[cluster * self.dim..(cluster + 1) * self.dim];
+                        emd_with_context(
+                            "assignment",
+                            index,
+                            cluster,
+                            point,
+                            centroid,
+                            self.ground,
+                            self.dim,
+                        )
+                        .map(|distance| (cluster as u16, distance))
+                    }))
+                })
+                .collect::<Result<_, _>>()?;
+            let total: f64 = self.weight.iter().map(|&value| value as f64).sum();
+            let moved: f64 = assigned
+                .iter()
+                .zip(&self.assignment)
+                .zip(self.weight)
+                .filter(|((next, old), _)| next.0 != **old)
+                .map(|(_, &value)| value as f64)
+                .sum();
+            let objective_before_update = assigned
+                .iter()
+                .zip(self.weight)
+                .map(|(entry, &value)| entry.1 as f64 * value as f64)
+                .sum::<f64>()
+                / total;
+            if let Some(previous) = self.diagnostics.last_mut() {
+                previous.objective_after_reassignment = Some(objective_before_update);
+            }
+            self.objective.push(objective_before_update);
+            for (slot, entry) in self.assignment.iter_mut().zip(&assigned) {
+                *slot = entry.0;
+            }
+            let mut sums = vec![0.0f64; self.k * self.dim];
+            let mut mass = vec![0.0f64; self.k];
+            for index in 0..n {
+                let cluster = self.assignment[index] as usize;
+                let row_weight = self.weight[index] as f64;
+                mass[cluster] += row_weight;
+                for (sum, &value) in sums[cluster * self.dim..(cluster + 1) * self.dim]
+                    .iter_mut()
+                    .zip(row(index))
+                {
+                    *sum += row_weight * value as f64;
+                }
+            }
+            for cluster in 0..self.k {
+                if mass[cluster] > 0.0 {
+                    for offset in 0..self.dim {
+                        self.centroids[cluster * self.dim + offset] =
+                            (sums[cluster * self.dim + offset] / mass[cluster]) as f32;
+                    }
+                }
+            }
+            let objective_after_update = (0..n)
+                .map(|index| {
+                    let cluster = self.assignment[index] as usize;
+                    emd_with_context(
+                        "objective-after-update",
+                        index,
+                        cluster,
+                        row(index),
+                        &self.centroids[cluster * self.dim..(cluster + 1) * self.dim],
+                        self.ground,
+                        self.dim,
+                    )
+                    .map(|distance| distance as f64 * self.weight[index] as f64)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .sum::<f64>()
+                / total;
+            let diagnostic = TestOnlyEmdIteration {
+                objective_before_update,
+                objective_after_update,
+                objective_after_reassignment: None,
+                moved_weight_fraction: moved / total,
+                occupied_buckets: mass.iter().filter(|&&value| value > 0.0).count(),
+            };
+            self.stabilized = diagnostic.moved_weight_fraction < 1e-4;
+            self.diagnostics.push(diagnostic.clone());
+            Ok(Some(diagnostic))
+        }
+
+        fn final_assignment_diagnostic(
+            &self,
+        ) -> Result<FinalAssignmentDiagnostic, EmdContextError> {
+            let n = self.weight.len();
+            let row = |index: usize| &self.points[index * self.dim..(index + 1) * self.dim];
+            let reassigned: Vec<(u16, f32)> = (0..n)
+                .into_par_iter()
+                .map(|index| {
+                    first_minimum_emd((0..self.k).map(|cluster| {
+                        let centroid =
+                            &self.centroids[cluster * self.dim..(cluster + 1) * self.dim];
+                        emd_with_context(
+                            "final-assignment-diagnostic",
+                            index,
+                            cluster,
+                            row(index),
+                            centroid,
+                            self.ground,
+                            self.dim,
+                        )
+                        .map(|distance| (cluster as u16, distance))
+                    }))
+                })
+                .collect::<Result<_, _>>()?;
+            let total: f64 = self.weight.iter().map(|&value| value as f64).sum();
+            let changed_weight_fraction = reassigned
+                .iter()
+                .zip(&self.assignment)
+                .zip(self.weight)
+                .filter(|((next, current), _)| next.0 != **current)
+                .map(|(_, &value)| value as f64)
+                .sum::<f64>()
+                / total;
+            let objective = reassigned
+                .iter()
+                .zip(self.weight)
+                .map(|(entry, &value)| entry.1 as f64 * value as f64)
+                .sum::<f64>()
+                / total;
+            Ok(FinalAssignmentDiagnostic {
+                changed_weight_fraction,
+                objective,
+            })
+        }
+
+        fn state_words(&self) -> Vec<u32> {
+            self.assignment
+                .iter()
+                .map(|&assignment| assignment as u32)
+                .chain(self.centroids.iter().map(|value| value.to_bits()))
+                .chain([(self.rng.0 >> 32) as u32, self.rng.0 as u32])
+                .collect()
+        }
+    }
+
+    fn test_only_state_fingerprint(words: &[u32]) -> u64 {
+        words.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, &word| {
+            (hash ^ word as u64).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    }
+
+    fn test_only_record_step(
+        trace: &mut std::fs::File,
+        seen: &mut std::collections::HashMap<Vec<u32>, usize>,
+        iteration: usize,
+        stepper: &TestOnlyEmdStepper<'_>,
+        diagnostic: &TestOnlyEmdIteration,
+    ) -> Option<(usize, usize)> {
+        use std::io::Write;
+
+        let state = stepper.state_words();
+        let fingerprint = test_only_state_fingerprint(&state);
+        let repeated = seen
+            .insert(state, iteration)
+            .map(|first_seen_at| (first_seen_at, iteration));
+        writeln!(
+            trace,
+            "iteration={iteration} objective_before={:.9} objective_after={:.9} moved_weight_fraction={:.9} occupied_buckets={} state_fingerprint={fingerprint:016X}",
+            diagnostic.objective_before_update,
+            diagnostic.objective_after_update,
+            diagnostic.moved_weight_fraction,
+            diagnostic.occupied_buckets,
+        )
+        .expect("write per-step flop probe trace");
+        trace.flush().expect("flush per-step flop probe trace");
+        repeated
+    }
+
     #[derive(Debug)]
     struct AugmentationTrace {
         amount: f64,
@@ -3637,6 +3928,201 @@ mod tests {
             "flop-trajectory control iterations=10 final_objective={:.9} changed_weight_fraction={:.9}",
             ten_diagnostic.objective, ten_diagnostic.changed_weight_fraction,
         );
+    }
+
+    /// Единственный release-probe продолжает flop после 10-го update без
+    /// повторной оплаты первых 10 итераций; путь trace задаётся окружением.
+    #[test]
+    #[ignore = "ручное test-only расследование траектории flop; запускать с --ignored --nocapture под timeout 300 с"]
+    fn test_only_ranks6_flop_k20_stateful_trajectory_to_twenty_iterations() {
+        use std::io::Write;
+
+        const K: usize = 20;
+        const SEED: u64 = 202_610_050_003;
+        const CONTROL_FLOP_OBJECTIVES: [f64; 10] = [
+            0.052_218_402_081_649_31,
+            0.048_975_848_067_693_31,
+            0.047_125_931_493_033_9,
+            0.045_908_284_084_046_23,
+            0.044_481_157_472_547_085,
+            0.043_480_023_156_214_17,
+            0.042_986_778_310_103_405,
+            0.043_031_078_124_860_24,
+            0.043_051_403_845_207_614,
+            0.043_068_505_771_261_47,
+        ];
+        const CONTROL_FINAL_OBJECTIVE: f64 = 0.043_054_945;
+        const CONTROL_CHANGED_WEIGHT: f64 = 0.005_881_799;
+
+        let trace_path = std::env::var("HU20_FLOP_PROBE_TRACE_PATH")
+            .expect("HU20_FLOP_PROBE_TRACE_PATH is required for the test-only probe");
+        let mut trace = std::fs::File::create(trace_path).expect("create flop probe trace");
+        let deck = deck(6);
+        let river = RiverTable::build(&deck);
+        let river_clusters = kmeans(&river.equity, 1, &river.weight, K, SEED, 10);
+        let river_ground = equity_ground(&river_clusters.centroids);
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, K);
+        let turn_clusters = kmeans_wasserstein_1d_with_diagnostics(
+            &turn.distribution,
+            &turn.weight,
+            &river_clusters.centroids,
+            K,
+            SEED,
+            50,
+            true,
+        );
+        assert_eq!(turn_clusters.diagnostics.len(), 21);
+        assert_eq!(
+            turn_clusters
+                .final_assignment_diagnostic
+                .as_ref()
+                .expect("requested final turn diagnostic")
+                .changed_weight_fraction,
+            0.0
+        );
+        let turn_ground = centroid_emd_matrix(&turn_clusters.centroids, K, &river_ground)
+            .expect("valid reproduced turn ground matrix");
+        let flop = PotentialFeatures::build(&deck, 3, &turn.keys, &turn_clusters.assignment, K);
+        let mut stepper =
+            TestOnlyEmdStepper::new(&flop.distribution, K, &flop.weight, &turn_ground, K, SEED);
+        let mut seen = std::collections::HashMap::new();
+        for iteration in 1..=10 {
+            let diagnostic = stepper
+                .step()
+                .expect("valid control step")
+                .expect("control must not stabilize before iteration 10");
+            assert_eq!(
+                test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic),
+                None
+            );
+        }
+        for (&actual, &expected) in stepper.objective.iter().zip(CONTROL_FLOP_OBJECTIVES.iter()) {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "actual={actual:.15}, expected={expected:.15}"
+            );
+        }
+        let state_before_control_diagnostic = stepper.state_words();
+        let control_diagnostic = stepper
+            .final_assignment_diagnostic()
+            .expect("valid control final reassignment");
+        assert_eq!(state_before_control_diagnostic, stepper.state_words());
+        assert!((control_diagnostic.objective - CONTROL_FINAL_OBJECTIVE).abs() < 1e-8);
+        assert!((control_diagnostic.changed_weight_fraction - CONTROL_CHANGED_WEIGHT).abs() < 1e-8);
+        writeln!(
+            trace,
+            "control_final_diagnostic objective={:.9} changed_weight_fraction={:.9}",
+            control_diagnostic.objective, control_diagnostic.changed_weight_fraction,
+        )
+        .expect("write control diagnostic");
+        trace.flush().expect("flush control diagnostic");
+
+        let mut repeated_state = None;
+        for iteration in 11..=20 {
+            let Some(diagnostic) = stepper.step().expect("valid continuation step") else {
+                break;
+            };
+            repeated_state =
+                test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic);
+            if repeated_state.is_some() {
+                break;
+            }
+        }
+        let final_diagnostic = stepper
+            .final_assignment_diagnostic()
+            .expect("valid final reassignment");
+        writeln!(
+            trace,
+            "final iterations={} changed_weight_fraction={:.9} objective={:.9} repeated_state={repeated_state:?}",
+            stepper.diagnostics.len(),
+            final_diagnostic.changed_weight_fraction,
+            final_diagnostic.objective,
+        )
+        .expect("write final diagnostic");
+        trace.flush().expect("flush final diagnostic");
+    }
+
+    #[test]
+    fn test_only_emd_stepper_matches_continuous_and_resumed_trajectory() {
+        let points = vec![1.0, 0.0, 0.8, 0.2, 0.2, 0.8, 0.0, 1.0];
+        let weights = vec![3, 5, 7, 11];
+        let ground = vec![0.0, 1.0, 1.0, 0.0];
+        let expected =
+            kmeans_emd_with_diagnostics(&points, 2, &weights, &ground, 2, 17, 5, None, false)
+                .expect("valid uninterrupted clustering");
+
+        let mut continuous = TestOnlyEmdStepper::new(&points, 2, &weights, &ground, 2, 17);
+        for _ in 0..5 {
+            continuous.step().expect("valid continuous step");
+        }
+
+        let mut split = TestOnlyEmdStepper::new(&points, 2, &weights, &ground, 2, 17);
+        for _ in 0..2 {
+            split.step().expect("valid prefix step");
+        }
+        let snapshot = split.snapshot();
+        let mut resumed =
+            TestOnlyEmdStepper::from_snapshot(&points, 2, &weights, &ground, 2, snapshot);
+        for _ in 0..3 {
+            resumed.step().expect("valid resumed step");
+        }
+
+        assert_eq!(continuous.assignment, expected.assignment);
+        assert_eq!(continuous.assignment, resumed.assignment);
+        assert_eq!(
+            continuous
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            continuous
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            resumed
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(continuous.objective.len(), expected.objective.len());
+        for ((actual, expected), resumed) in continuous
+            .objective
+            .iter()
+            .zip(&expected.objective)
+            .zip(&resumed.objective)
+        {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+            assert_eq!(actual.to_bits(), resumed.to_bits());
+        }
+        assert_eq!(continuous.diagnostics.len(), expected.diagnostics.len());
+        for (actual, expected) in continuous.diagnostics.iter().zip(&expected.diagnostics) {
+            assert_eq!(
+                actual.objective_before_update.to_bits(),
+                expected.objective_before_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_update.to_bits(),
+                expected.objective_after_update.to_bits()
+            );
+            assert_eq!(
+                actual.objective_after_reassignment.map(f64::to_bits),
+                expected.objective_after_reassignment.map(f64::to_bits)
+            );
+            assert_eq!(
+                actual.moved_weight_fraction.to_bits(),
+                expected.moved_weight_fraction.to_bits()
+            );
+            assert_eq!(actual.occupied_buckets, expected.occupied_buckets);
+        }
     }
 
     #[test]
