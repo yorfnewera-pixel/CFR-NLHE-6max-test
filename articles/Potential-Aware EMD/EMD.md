@@ -374,6 +374,18 @@ seed, общим `iterations=10`, `turn_iterations=50`, двумя потока�
 Полные objectives, SHA-256, профиль и максимумы памяти:
 `web_reports/potential-emd-r7-k10-turn50-flop30-seed-202610050003-control-20261103.md`.
 
+### Gate test-only continuation ranks=7, K=10
+
+Согласованный один test-only probe не стартовал: точный `checkpoint-28.bin`
+с assignments, битами центров и RNG отсутствует. Полная траектория
+`turn_objective` есть в `summary.json`, но полная неокруглённая финальная
+диагностика там не записана; в `stderr.log` остаётся только округлённая строка
+`0.000019111 / 0.062617997`. Поэтому обязательная сверка replay с исходным
+контролем невозможна без расширения допуска, что запрещено. River+turn replay,
+continuation и новые checkpoint не выполнялись; production-код не менялся.
+Подробности:
+`web_reports/potential-emd-r7-k10-turn50-flop30-seed-202610050003-control-20261103.md`.
+
 ### Диагностика причин остановки ranks=7, K=10
 
 По сохранённому `stderr.log` и `summary.json` установлено: turn дошёл до
