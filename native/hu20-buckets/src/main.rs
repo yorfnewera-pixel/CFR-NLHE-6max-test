@@ -88,9 +88,12 @@ fn write_emd_diagnostic(
     error: &EmdContextError,
 ) -> std::io::Result<PathBuf> {
     let path = out.join(format!("emd-failure-{stage}.txt"));
+    let code_revision = git_metadata()
+        .map(|(revision, _)| revision)
+        .unwrap_or_else(|error| format!("unavailable: {error}"));
     let diagnostic = format!(
         "code_revision={}\nstage={stage}\n{error:#?}\n",
-        code_revision(),
+        code_revision,
     );
     atomic_write(&path, diagnostic.as_bytes())?;
     Ok(path)
@@ -104,25 +107,36 @@ fn abort_emd(out: &Path, stage: &str, error: EmdContextError) -> ! {
     );
 }
 
-fn code_revision() -> String {
-    std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|revision| revision.trim().to_owned())
-        .filter(|revision| !revision.is_empty())
-        .unwrap_or_else(|| "unknown".to_owned())
+fn git_metadata_with<F>(mut run_git: F) -> Result<(String, bool), String>
+where
+    F: FnMut(&[&str]) -> Result<String, String>,
+{
+    let revision = run_git(&["rev-parse", "HEAD"])?;
+    let revision = revision.trim();
+    if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("git rev-parse did not return a full SHA-1 revision".to_owned());
+    }
+    let status = run_git(&["status", "--porcelain"])?;
+    Ok((revision.to_owned(), !status.is_empty()))
 }
 
-fn working_tree_is_dirty() -> bool {
-    std::process::Command::new("git")
-        .args(["status", "--porcelain"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .is_some_and(|output| !output.stdout.is_empty())
+fn git_metadata() -> Result<(String, bool), String> {
+    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| "cannot determine repository root from Cargo manifest".to_owned())?;
+    git_metadata_with(|args| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(repository_root)
+            .output()
+            .map_err(|error| format!("cannot run git: {error}"))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+        }
+        String::from_utf8(output.stdout)
+            .map_err(|error| format!("git output is not UTF-8: {error}"))
+    })
 }
 
 fn bucket_summary(k: usize, assignment: &[u16], weight: &[u64], equity: &[f32]) -> String {
@@ -176,10 +190,12 @@ fn build(args: &[String]) {
         started: Instant::now(),
         status: out.join("status.json"),
     };
+    let (code_revision, working_tree_dirty) = git_metadata()
+        .unwrap_or_else(|error| panic!("verified Git provenance is required: {error}"));
     let deck = deck(ranks);
     let mut summary = vec![format!(
         "\"format\": \"{}\", \"ranks\": {ranks}, \"deck_cards\": {}, \"bins\": {bins}, \"seed\": {seed}, \"ks\": {ks:?}, \"iterations\": {iterations}, \"turn_iterations\": {turn_iterations}, \"turn_iterations_explicit\": {turn_iterations_explicit}, \"flop_iterations\": {flop_iterations}, \"flop_iterations_explicit\": {flop_iterations_explicit}, \"threads\": {}, \"code_revision\": \"{}\", \"working_tree_dirty\": {}",
-        if abstraction == "potential" { "hu20-potential-aware-emd-v1" } else { "hu20-equity-buckets-v1" }, deck.len(), rayon::current_num_threads(), code_revision(), working_tree_is_dirty())];
+        if abstraction == "potential" { "hu20-potential-aware-emd-v1" } else { "hu20-equity-buckets-v1" }, deck.len(), rayon::current_num_threads(), code_revision, working_tree_dirty)];
 
     log.stage("river-equity", "computing");
     let river = RiverTable::build(&deck);
@@ -571,9 +587,33 @@ mod tests {
     }
 
     #[test]
-    fn code_revision_is_full_git_sha() {
-        let revision = code_revision();
-        assert!(revision == "unknown" || revision.len() == 40, "{revision}");
+    fn git_metadata_requires_verified_revision_and_status() {
+        let mut responses = [
+            Ok("0123456789abcdef0123456789abcdef01234567\n".to_owned()),
+            Ok(String::new()),
+        ]
+        .into_iter();
+
+        let metadata = git_metadata_with(|_| responses.next().expect("expected git command"));
+
+        assert_eq!(
+            metadata.expect("verified metadata"),
+            ("0123456789abcdef0123456789abcdef01234567".to_owned(), false)
+        );
+    }
+
+    #[test]
+    fn git_metadata_rejects_failed_status_check() {
+        let mut responses = [
+            Ok("0123456789abcdef0123456789abcdef01234567\n".to_owned()),
+            Err("git status failed".to_owned()),
+        ]
+        .into_iter();
+
+        let error = git_metadata_with(|_| responses.next().expect("expected git command"))
+            .expect_err("failed git status must not become clean metadata");
+
+        assert_eq!(error, "git status failed");
     }
 
     #[test]

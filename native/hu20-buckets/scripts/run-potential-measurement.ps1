@@ -31,14 +31,36 @@ if (-not (Test-Path -LiteralPath $output -PathType Container)) {
     throw "Output directory was not created: $output"
 }
 
-Push-Location $project
-try {
-    if (git status --porcelain) {
+function Get-VerifiedGitProvenance {
+    $revision = (git rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-fA-F]{40}$') {
+        throw 'Unable to verify the Git revision before measurement.'
+    }
+
+    $status = git status --porcelain
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to verify the Git working tree before measurement.'
+    }
+    if ($status) {
         throw 'Refusing to measure a dirty working tree. Commit or stash changes first.'
     }
+
+    [PSCustomObject]@{
+        Revision = $revision.ToLowerInvariant()
+        Dirty = $false
+    }
+}
+
+Push-Location $project
+try {
+    $provenanceBeforeBuild = Get-VerifiedGitProvenance
     cargo build --release
     if ($LASTEXITCODE -ne 0) {
         throw "Release build failed with code $LASTEXITCODE."
+    }
+    $provenanceBeforeLaunch = Get-VerifiedGitProvenance
+    if ($provenanceBeforeBuild.Revision -ne $provenanceBeforeLaunch.Revision) {
+        throw 'Git revision changed during the release build; refusing to start measurement.'
     }
     $binary = Join-Path $project 'target\release\hu20-buckets.exe'
     if (-not (Test-Path -LiteralPath $binary)) { throw "Release binary was not found: $binary" }
@@ -64,6 +86,10 @@ try {
     @(
         "output_directory=$output"
         "launcher_utc=$([DateTime]::UtcNow.ToString('o'))"
+        "git_revision_before_build=$($provenanceBeforeBuild.Revision)"
+        "git_dirty_before_build=$($provenanceBeforeBuild.Dirty.ToString().ToLowerInvariant())"
+        "git_revision_before_launch=$($provenanceBeforeLaunch.Revision)"
+        "git_dirty_before_launch=$($provenanceBeforeLaunch.Dirty.ToString().ToLowerInvariant())"
         "powershell_version=$($PSVersionTable.PSVersion)"
         "powershell_edition=$($PSVersionTable.PSEdition)"
         "dotnet_version=$([Environment]::Version)"
