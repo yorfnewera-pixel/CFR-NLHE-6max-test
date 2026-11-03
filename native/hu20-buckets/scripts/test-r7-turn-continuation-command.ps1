@@ -24,3 +24,11 @@ if (Test-R7TurnContinuationDiscovery -CargoExitCode 0 -OutputLines @() -FullTest
 if (Test-R7TurnContinuationDiscovery -CargoExitCode 0 -OutputLines @($targetLine, $targetLine) -FullTestName $command.FullTestName) {
     throw 'Discovery must reject multiple selected tests.'
 }
+
+$inspection = Get-R7TurnContinuationCargoCommand -ManifestPath $manifestPath -Inspection
+if ($inspection.FullTestName -ne 'tests::test_only_ranks7_turn_k10_inspects_verified_step_28_only') {
+    throw "Unexpected inspection full test name: $($inspection.FullTestName)"
+}
+if ($inspection.SelectionArguments[-1] -ne $inspection.FullTestName) {
+    throw 'Inspection selection arguments are missing the exact full test name.'
+}

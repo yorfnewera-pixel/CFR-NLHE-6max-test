@@ -1,10 +1,15 @@
 function Get-R7TurnContinuationCargoCommand {
     param(
-        [Parameter(Mandatory)] [string] $ManifestPath
+        [Parameter(Mandatory)] [string] $ManifestPath,
+        [switch] $Inspection
     )
 
     $resolvedManifest = (Resolve-Path -LiteralPath $ManifestPath).Path
-    $fullTestName = 'tests::test_only_ranks7_turn_k10_continues_after_verified_step_28_only'
+    $fullTestName = if ($Inspection) {
+        'tests::test_only_ranks7_turn_k10_inspects_verified_step_28_only'
+    } else {
+        'tests::test_only_ranks7_turn_k10_continues_after_verified_step_28_only'
+    }
     $selectionArguments = @(
         'test',
         '--manifest-path',
@@ -22,6 +27,7 @@ function Get-R7TurnContinuationCargoCommand {
         BuildArguments = @('test', '--manifest-path', $resolvedManifest, '--release', '--lib', '--no-run')
         DiscoveryArguments = @($selectionArguments + @('--', '--list'))
         ContinuationArguments = @($selectionArguments + @('--') + $libtestArguments)
+        Inspection = [bool]$Inspection
     }
 }
 

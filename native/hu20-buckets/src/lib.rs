@@ -2188,6 +2188,10 @@ mod tests {
         Ok(checkpoint_iteration + 1..=final_iteration)
     }
 
+    fn test_only_roundtrip_decimal(value: f64) -> String {
+        format!("{value:?}")
+    }
+
     fn cards(text: &str) -> Vec<u8> {
         text.split_whitespace().map(parse_card).collect()
     }
@@ -5287,6 +5291,73 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "ручной test-only inspection checkpoint-28; не выполняет continuation"]
+    fn test_only_ranks7_turn_k10_inspects_verified_step_28_only() {
+        use std::io::Write;
+
+        const K: usize = 10;
+        const SEED: u64 = 202_610_050_003;
+        let checkpoint_path = std::path::PathBuf::from(
+            std::env::var("HU20_R7_TURN_CONTINUATION_CHECKPOINT_PATH")
+                .expect("HU20_R7_TURN_CONTINUATION_CHECKPOINT_PATH is required"),
+        );
+        let trace_path = std::path::PathBuf::from(
+            std::env::var("HU20_R7_TURN_PROBE_TRACE_PATH")
+                .expect("HU20_R7_TURN_PROBE_TRACE_PATH is required"),
+        );
+        assert!(checkpoint_path.is_file(), "checkpoint-28 must exist");
+        assert!(!trace_path.exists(), "trace path must be new");
+
+        let deck = deck(7);
+        let river = RiverTable::build(&deck);
+        let river_clusters = kmeans(&river.equity, 1, &river.weight, K, SEED, 10);
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, K);
+        let stepper = test_only_resume_wasserstein_from_checkpoint(
+            &checkpoint_path,
+            &turn.distribution,
+            &turn.weight,
+            &river_clusters.centroids,
+            K,
+        )
+        .expect("load verified checkpoint-28");
+        assert_eq!(stepper.diagnostics.len(), TEST_ONLY_R7_TURN_REPLAY_LIMIT);
+        assert_eq!(stepper.objective.len(), TEST_ONLY_R7_TURN_REPLAY_LIMIT);
+        assert!(
+            stepper.stabilized,
+            "checkpoint-28 must retain early-stop state"
+        );
+
+        let checkpoint_objective = *stepper.objective.last().expect("step-28 objective");
+        let state_before_diagnostic = stepper.state_words();
+        let diagnostic = stepper.final_assignment_diagnostic();
+        assert_eq!(state_before_diagnostic, stepper.state_words());
+
+        let mut trace = std::fs::File::create(trace_path).expect("create inspection trace");
+        writeln!(
+            trace,
+            "checkpoint iteration=28 objective_bits={:016X} objective_roundtrip={} source=serialized_checkpoint",
+            checkpoint_objective.to_bits(),
+            test_only_roundtrip_decimal(checkpoint_objective),
+        )
+        .expect("write checkpoint objective");
+        writeln!(
+            trace,
+            "diagnostic iteration=28 objective_bits={:016X} objective_roundtrip={} changed_weight_fraction_bits={:016X} changed_weight_fraction_roundtrip={} source=recomputed_non_mutating",
+            diagnostic.objective.to_bits(),
+            test_only_roundtrip_decimal(diagnostic.objective),
+            diagnostic.changed_weight_fraction.to_bits(),
+            test_only_roundtrip_decimal(diagnostic.changed_weight_fraction),
+        )
+        .expect("write recomputed diagnostic");
+        writeln!(
+            trace,
+            "checkpoint_gate_passed=true continuation_started=false"
+        )
+        .expect("write inspection completion");
+        trace.flush().expect("flush inspection trace");
+    }
+
+    #[test]
     #[ignore = "ручной test-only continuation checkpoint-28 до шага 50; запускать с --ignored --exact --nocapture под общим timeout 300 с"]
     fn test_only_ranks7_turn_k10_continues_after_verified_step_28_only() {
         use std::io::Write;
@@ -6120,6 +6191,21 @@ mod tests {
         );
         assert!(test_only_ranks7_continuation_iterations(27, 50).is_err());
         assert!(test_only_ranks7_continuation_iterations(28, 51).is_err());
+    }
+
+    #[test]
+    fn test_only_roundtrip_decimal_preserves_f64_bits() {
+        for bits in [
+            0x0000_0000_0000_0001,
+            0x3ef4_0000_0000_0001,
+            0x3fb0_0000_0000_0001,
+            0x7fe_f_ffff_ffff_ffff,
+        ] {
+            let value = f64::from_bits(bits);
+            let rendered = test_only_roundtrip_decimal(value);
+            let parsed = rendered.parse::<f64>().expect("parse round-trip decimal");
+            assert_eq!(parsed.to_bits(), bits, "round-trip failed for {bits:016X}");
+        }
     }
 
     #[test]

@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 
 $expectedCheckpointSha256 = '94251D3D492741A62D1E38216F4C472597BAF6A4F12FDE71FB203C9AB3B213FC'
 $project = Split-Path -Parent $PSScriptRoot
-$cargoCommand = Get-R7TurnContinuationCargoCommand -ManifestPath (Join-Path $project 'Cargo.toml')
+$cargoCommand = Get-R7TurnContinuationCargoCommand -ManifestPath (Join-Path $project 'Cargo.toml') -Inspection:$VerifyOnly
 $sourceCheckpoint = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CheckpointPath)
 if (-not (Test-Path -LiteralPath $sourceCheckpoint -PathType Leaf)) {
     throw "Checkpoint does not exist: $sourceCheckpoint"
@@ -49,10 +49,11 @@ $context = Join-Path $output 'launcher-context.txt'
     'flop=false'
     'production_tables=false'
     "verify_only=$VerifyOnly"
+    "inspection=$($cargoCommand.Inspection)"
     "manifest_path=$($cargoCommand.ManifestPath)"
     "test=$($cargoCommand.FullTestName)"
     "selection_arguments=$(ConvertTo-CargoArgumentString $cargoCommand.SelectionArguments)"
-    "continuation_arguments=$(ConvertTo-CargoArgumentString $cargoCommand.ContinuationArguments)"
+    "run_arguments=$(ConvertTo-CargoArgumentString $cargoCommand.ContinuationArguments)"
 ) | Set-Content -LiteralPath $context -Encoding utf8
 
 Push-Location $project
@@ -71,11 +72,6 @@ try {
         throw "Continuation discovery did not select exactly $($cargoCommand.FullTestName)."
     }
     'discovery_found=true' | Add-Content -LiteralPath $context -Encoding utf8
-    if ($VerifyOnly) {
-        'verify_only_complete=true' | Add-Content -LiteralPath $context -Encoding utf8
-        return
-    }
-
     $previousThreads = $env:RAYON_NUM_THREADS
     $previousTrace = $env:HU20_R7_TURN_PROBE_TRACE_PATH
     $previousCheckpoints = $env:HU20_R7_TURN_PROBE_CHECKPOINT_DIR
@@ -103,6 +99,17 @@ try {
         throw 'Continuation did not execute exactly one successful test.'
     }
     if (-not (Test-Path -LiteralPath $trace -PathType Leaf)) { throw 'Continuation did not create a trace.' }
+    if ($VerifyOnly) {
+        $inspectionTrace = Get-Content -Raw -LiteralPath $trace
+        if ($inspectionTrace -notmatch 'checkpoint_gate_passed=true continuation_started=false') {
+            throw 'Checkpoint inspection did not pass the gate.'
+        }
+        'checkpoint_gate_passed=true' | Add-Content -LiteralPath $context -Encoding utf8
+        'continuation_started=false' | Add-Content -LiteralPath $context -Encoding utf8
+        'verify_only_complete=true' | Add-Content -LiteralPath $context -Encoding utf8
+        return
+    }
+    'continuation_started=true' | Add-Content -LiteralPath $context -Encoding utf8
     foreach ($iteration in 29..50) {
         $checkpoint = Join-Path $checkpoints ("checkpoint-{0:D2}.bin" -f $iteration)
         if (-not (Test-Path -LiteralPath $checkpoint -PathType Leaf)) {
