@@ -755,3 +755,15 @@ Flop исчерпал свой budget 30 с ненулевой финально�
 прежним R7/K10, turn/flop hashes изменились и зафиксированы без требования
 совпадения. Повторов, иных seed и последующих запусков не выполнялось.
 Детали: `web_reports/potential-emd-r7-k10-turn50-flop30-gate-control-20261103.md`.
+
+### Inspection/preflight flop R7/K10 из шага 30
+
+Только read-only проверка последнего R7/K10 gate-control установила, что
+production-каталог не содержит checkpoint-30, полного flop-state, RNG,
+битов центров или `turn_ground`; таблицы сохраняют лишь keys и assignments.
+Существующий test-only checkpoint/continuation для flop фиксирован на
+R6/K20, а turn checkpoint R7/K10 относится к другой улице и backend. Поэтому
+точное восстановление flop из шага 30 и continuation 31–50 сейчас запрещены:
+иначе это был бы replay с нуля. Предложен отдельный capture-only шаг с
+точной сверкой 1–30 и сохранением checkpoint-30; он не запускался. Детали:
+`web_reports/potential-emd-r7-k10-flop-step30-continuation-preflight-20261103.md`.
