@@ -821,3 +821,14 @@ profile, а flop CLI записывает termination/consistency независ
 вывода. Выполнены только unit/CLI тесты: генератор, capture/replay и
 continuation не запускались. Детали:
 `web_reports/potential-emd-generic-final-assignment-gate-20261103.md`.
+
+### Production-контроль generic gate R7/K10
+
+Ровно один production-control `10/50/50` на commit `d53e51a` завершился с
+exit code `0` и `status=complete`. River 1–10, turn 1–29 и flop 1–30
+побитово совпали с прежним gate-control; river/turn SHA-256 сохранены. Flop
+на шаге 40 остановился как `EarlyStopConsistent` с signed-zero final changed
+fraction и `final_assignment_consistent=true`; его новый hash отличается от
+исторической таблицы шага 30. Gate profile: 3.585217600 с и 487690
+EMD-вызовов, отдельная диагностика не потребовалась. Детали:
+`web_reports/potential-emd-r7-k10-turn50-flop50-generic-gate-control-20261103.md`.
