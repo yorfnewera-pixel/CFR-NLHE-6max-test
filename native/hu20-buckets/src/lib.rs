@@ -3003,6 +3003,20 @@ mod tests {
         TestOnlyEmdCheckpoint::write_atomic(&path, stepper).expect("write atomic step checkpoint");
     }
 
+    fn test_only_resume_from_checkpoint<'a>(
+        path: &std::path::Path,
+        points: &'a [f32],
+        dim: usize,
+        weight: &'a [u64],
+        ground: &'a [f32],
+        k: usize,
+    ) -> Result<TestOnlyEmdStepper<'a>, String> {
+        let snapshot = TestOnlyEmdCheckpoint::load(path, points, dim, weight, ground, k)?;
+        Ok(TestOnlyEmdStepper::from_snapshot(
+            points, dim, weight, ground, k, snapshot,
+        ))
+    }
+
     fn test_only_load_trace_metrics(
         path: &std::path::Path,
     ) -> Result<std::collections::HashMap<usize, (f64, f64, f64)>, String> {
@@ -4383,6 +4397,116 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "ручное test-only возобновление flop из checkpoint; запускать с --ignored --nocapture под timeout 300 с"]
+    fn test_only_ranks6_flop_k20_resume_from_checkpoint_to_twenty_iterations() {
+        use std::io::Write;
+        use std::time::Instant;
+
+        const K: usize = 20;
+        const SEED: u64 = 202_610_050_003;
+        const CHECKPOINT_STEP: usize = 18;
+        const INPUT_FINGERPRINT: u64 = 0xDF7E_8949_91B2_639B;
+        let checkpoint_path =
+            std::path::PathBuf::from(std::env::var("HU20_FLOP_RESUME_CHECKPOINT_PATH").expect(
+                "HU20_FLOP_RESUME_CHECKPOINT_PATH is required for the test-only resume probe",
+            ));
+        let checkpoint_directory =
+            std::path::PathBuf::from(std::env::var("HU20_FLOP_RESUME_CHECKPOINT_DIR").expect(
+                "HU20_FLOP_RESUME_CHECKPOINT_DIR is required for the test-only resume probe",
+            ));
+        let trace_path = std::path::PathBuf::from(
+            std::env::var("HU20_FLOP_RESUME_TRACE_PATH")
+                .expect("HU20_FLOP_RESUME_TRACE_PATH is required for the test-only resume probe"),
+        );
+        assert!(
+            checkpoint_directory.is_dir(),
+            "checkpoint directory must exist"
+        );
+        assert!(
+            std::fs::read_dir(&checkpoint_directory)
+                .expect("read checkpoint directory")
+                .next()
+                .is_none(),
+            "checkpoint directory must be empty"
+        );
+        assert!(!trace_path.exists(), "resume trace must not exist");
+        let header =
+            TestOnlyEmdCheckpoint::load_verified(&checkpoint_path, K, 21_150, K, INPUT_FINGERPRINT)
+                .expect("compatible saved checkpoint before input recovery");
+        assert_eq!(header.diagnostics.len(), CHECKPOINT_STEP);
+        assert!(!header.stabilized, "checkpoint must require continuation");
+
+        let recovery_started = Instant::now();
+        let deck = deck(6);
+        let river = RiverTable::build(&deck);
+        let river_clusters = kmeans(&river.equity, 1, &river.weight, K, SEED, 10);
+        let river_ground = equity_ground(&river_clusters.centroids);
+        let turn = PotentialFeatures::build(&deck, 4, &river.keys, &river_clusters.assignment, K);
+        let turn_clusters = kmeans_wasserstein_1d_with_diagnostics(
+            &turn.distribution,
+            &turn.weight,
+            &river_clusters.centroids,
+            K,
+            SEED,
+            50,
+            true,
+        );
+        assert_eq!(turn_clusters.diagnostics.len(), 21);
+        let turn_ground = centroid_emd_matrix(&turn_clusters.centroids, K, &river_ground)
+            .expect("valid reproduced turn ground matrix");
+        let flop = PotentialFeatures::build(&deck, 3, &turn.keys, &turn_clusters.assignment, K);
+        let mut stepper = test_only_resume_from_checkpoint(
+            &checkpoint_path,
+            &flop.distribution,
+            K,
+            &flop.weight,
+            &turn_ground,
+            K,
+        )
+        .expect("checkpoint must match reconstructed exact inputs");
+        let recovery_seconds = recovery_started.elapsed().as_secs_f64();
+        assert_eq!(stepper.diagnostics.len(), CHECKPOINT_STEP);
+        assert_eq!(stepper.objective.len(), CHECKPOINT_STEP);
+        assert!(!stepper.stabilized, "checkpoint must require continuation");
+
+        let mut trace = std::fs::File::create(&trace_path).expect("create resume probe trace");
+        writeln!(
+            trace,
+            "input_recovery_seconds={recovery_seconds:.3} checkpoint_step={CHECKPOINT_STEP} state_history=checkpoint-18-only"
+        )
+        .expect("write recovery metadata");
+        trace.flush().expect("flush recovery metadata");
+        let mut seen = std::collections::HashMap::new();
+        seen.insert(stepper.state_words(), CHECKPOINT_STEP);
+        let mut repeated_state = None;
+        for iteration in (CHECKPOINT_STEP + 1)..=20 {
+            let Some(diagnostic) = stepper.step().expect("valid resumed continuation step") else {
+                break;
+            };
+            test_only_write_checkpoint(&checkpoint_directory, iteration, &stepper);
+            repeated_state =
+                test_only_record_step(&mut trace, &mut seen, iteration, &stepper, &diagnostic);
+            if repeated_state.is_some() {
+                break;
+            }
+        }
+        let state_before_final_diagnostic = stepper.state_words();
+        let final_diagnostic = stepper
+            .final_assignment_diagnostic()
+            .expect("valid final reassignment");
+        assert_eq!(state_before_final_diagnostic, stepper.state_words());
+        writeln!(
+            trace,
+            "final iterations={} changed_weight_fraction={:.9} objective={:.9} repeated_state={repeated_state:?}",
+            stepper.diagnostics.len(),
+            final_diagnostic.changed_weight_fraction,
+            final_diagnostic.objective,
+        )
+        .expect("write final resume diagnostic");
+        trace.flush().expect("flush final resume diagnostic");
+    }
+
+    #[test]
     fn test_only_emd_stepper_matches_continuous_and_resumed_trajectory() {
         let points = vec![1.0, 0.0, 0.8, 0.2, 0.2, 0.8, 0.0, 1.0];
         let weights = vec![3, 5, 7, 11];
@@ -4539,6 +4663,69 @@ mod tests {
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[&11], (0.043054945, 0.043071678, 0.005881799));
         std::fs::remove_file(path).expect("remove trace fixture");
+    }
+
+    #[test]
+    fn test_only_resume_from_checkpoint_restores_bitwise_state() {
+        let points = vec![1.0, 0.0, 0.8, 0.2, 0.2, 0.8, 0.0, 1.0];
+        let weights = vec![3, 5, 7, 11];
+        let ground = vec![0.0, 1.0, 1.0, 0.0];
+        let path =
+            std::env::temp_dir().join(format!("hu20-test-only-resume-{}.bin", std::process::id()));
+        let mut expected = TestOnlyEmdStepper::new(&points, 2, &weights, &ground, 2, 17);
+        for _ in 0..2 {
+            expected.step().expect("valid checkpoint prefix");
+        }
+        TestOnlyEmdCheckpoint::write_atomic(&path, &expected).expect("write checkpoint");
+
+        let resumed = test_only_resume_from_checkpoint(&path, &points, 2, &weights, &ground, 2)
+            .expect("load compatible checkpoint");
+
+        assert_eq!(resumed.assignment, expected.assignment);
+        assert_eq!(
+            resumed
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            resumed
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+                .objective
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(resumed.diagnostics.len(), expected.diagnostics.len());
+        for (actual, expected) in resumed.diagnostics.iter().zip(&expected.diagnostics) {
+            assert_eq!(
+                (
+                    actual.objective_before_update.to_bits(),
+                    actual.objective_after_update.to_bits(),
+                    actual.objective_after_reassignment.map(f64::to_bits),
+                    actual.moved_weight_fraction.to_bits(),
+                    actual.occupied_buckets,
+                ),
+                (
+                    expected.objective_before_update.to_bits(),
+                    expected.objective_after_update.to_bits(),
+                    expected.objective_after_reassignment.map(f64::to_bits),
+                    expected.moved_weight_fraction.to_bits(),
+                    expected.occupied_buckets,
+                )
+            );
+        }
+        std::fs::remove_file(path).expect("remove checkpoint");
     }
 
     #[test]
