@@ -1,0 +1,17 @@
+[
+  {
+    "Path": "C:\\Users\\Cassmall\\Desktop\\CFR-NLHE-6max-test\\native\\hu20-buckets\\results\\potential-emd-r7-k10-turn50-flop30-seed-202610050003-control-20261103\\potential-flop-k10.bin",
+    "Algorithm": "SHA256",
+    "Hash": "1DD9DAD4E2369219F88901461D3716F41055F7C863DBB929208EB600F758D48D"
+  },
+  {
+    "Path": "C:\\Users\\Cassmall\\Desktop\\CFR-NLHE-6max-test\\native\\hu20-buckets\\results\\potential-emd-r7-k10-turn50-flop30-seed-202610050003-control-20261103\\potential-river-k10.bin",
+    "Algorithm": "SHA256",
+    "Hash": "AED0CC04033CD2F1C61FCD947499A3AFA7FB3E17B653AB7EB6986E17759EBDE3"
+  },
+  {
+    "Path": "C:\\Users\\Cassmall\\Desktop\\CFR-NLHE-6max-test\\native\\hu20-buckets\\results\\potential-emd-r7-k10-turn50-flop30-seed-202610050003-control-20261103\\potential-turn-k10.bin",
+    "Algorithm": "SHA256",
+    "Hash": "56DB62172DD7A2D27A9BF4AC3E729442C993358E4C1F8B28C2F4A51DBCE3BD81"
+  }
+]

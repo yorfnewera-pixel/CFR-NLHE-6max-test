@@ -1,0 +1,505 @@
+[      0.1s] river-equity computing
+[      0.2s] river-equity 1103011 classes
+[      0.2s] river-clustering start k=10
+[      0.4s] river-clustering end k=10
+[      0.4s] write-river-table start k=10
+[      0.4s] write-river-table end k=10
+[      0.5s] river-ground-matrix start k=10
+[      0.5s] river-ground-matrix end k=10
+[      0.5s] turn-features start k=10
+potential-features board_size=4: 260862/260862, elapsed_seconds=0.5
+[      1.1s] turn-features end k=10, classes=260862
+[      1.1s] turn-clustering start k=10
+[      2.2s] turn-clustering k=10, iteration=1, objective_before=0.093878108, objective_after=0.075023278, moved_weight_fraction=1.000000000, occupied_buckets=10
+[      2.2s] turn-clustering k=10, iteration=2, objective_before=0.069619095, objective_after=0.067368678, moved_weight_fraction=0.229320663, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=3, objective_before=0.066461445, objective_after=0.066452608, moved_weight_fraction=0.102710269, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=4, objective_before=0.065835569, objective_after=0.065391468, moved_weight_fraction=0.093096565, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=5, objective_before=0.064993761, objective_after=0.064570109, moved_weight_fraction=0.076514307, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=6, objective_before=0.064219256, objective_after=0.064058927, moved_weight_fraction=0.057720090, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=7, objective_before=0.063890308, objective_after=0.064029707, moved_weight_fraction=0.045274017, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=8, objective_before=0.063956841, objective_after=0.064000771, moved_weight_fraction=0.033592044, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=9, objective_before=0.063920528, objective_after=0.063954703, moved_weight_fraction=0.034534869, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=10, objective_before=0.063861846, objective_after=0.063854257, moved_weight_fraction=0.032154448, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=11, objective_before=0.063772263, objective_after=0.063676557, moved_weight_fraction=0.028806427, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=12, objective_before=0.063619773, objective_after=0.063597985, moved_weight_fraction=0.019871529, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=13, objective_before=0.063557347, objective_after=0.063584504, moved_weight_fraction=0.021123675, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=14, objective_before=0.063541176, objective_after=0.063491885, moved_weight_fraction=0.023261312, occupied_buckets=10
+[      2.3s] turn-clustering k=10, iteration=15, objective_before=0.063443047, objective_after=0.063362415, moved_weight_fraction=0.019156624, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=16, objective_before=0.063327102, objective_after=0.063248653, moved_weight_fraction=0.018065863, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=17, objective_before=0.063217400, objective_after=0.063096766, moved_weight_fraction=0.022312116, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=18, objective_before=0.063063193, objective_after=0.062984527, moved_weight_fraction=0.015358426, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=19, objective_before=0.062966368, objective_after=0.062895479, moved_weight_fraction=0.014668295, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=20, objective_before=0.062887448, objective_after=0.062775787, moved_weight_fraction=0.010088655, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=21, objective_before=0.062763998, objective_after=0.062653345, moved_weight_fraction=0.011027234, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=22, objective_before=0.062641214, objective_after=0.062626737, moved_weight_fraction=0.009250588, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=23, objective_before=0.062617737, objective_after=0.062624909, moved_weight_fraction=0.007633204, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=24, objective_before=0.062619914, objective_after=0.062630676, moved_weight_fraction=0.006382474, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=25, objective_before=0.062627927, objective_after=0.062625845, moved_weight_fraction=0.005333475, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=26, objective_before=0.062623934, objective_after=0.062617588, moved_weight_fraction=0.003025960, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=27, objective_before=0.062617296, objective_after=0.062618408, moved_weight_fraction=0.001170038, occupied_buckets=10
+[      2.4s] turn-clustering k=10, iteration=28, objective_before=0.062618406, objective_after=0.062617997, moved_weight_fraction=0.000053087, occupied_buckets=10
+[      2.5s] turn-clustering k=10, final_assignment_diagnostic=true, changed_weight_fraction=0.000019111, objective=0.062617997
+[      2.5s] turn-clustering end k=10
+[      2.5s] write-turn-table start k=10
+[      2.5s] write-turn-table end k=10
+[      2.5s] turn-ground-matrix start k=10
+[      2.5s] turn-ground-matrix end k=10
+[      2.5s] flop-features start k=10
+potential-features board_size=3: 48769/48769, elapsed_seconds=0.1
+[      2.6s] flop-features end k=10, classes=48769
+[      2.6s] flop-clustering start k=10
+[      0.0s] flop-clustering k=10, iteration=1, phase=assignment, start
+[      0.2s] flop-clustering k=10, iteration=1, phase=assignment, processed=4096/48769, emd_calls=40960
+[      0.4s] flop-clustering k=10, iteration=1, phase=assignment, processed=8192/48769, emd_calls=81920
+[      0.5s] flop-clustering k=10, iteration=1, phase=assignment, processed=12288/48769, emd_calls=122880
+[      0.7s] flop-clustering k=10, iteration=1, phase=assignment, processed=16384/48769, emd_calls=163840
+[      1.0s] flop-clustering k=10, iteration=1, phase=assignment, processed=20480/48769, emd_calls=204800
+[      1.2s] flop-clustering k=10, iteration=1, phase=assignment, processed=24576/48769, emd_calls=245760
+[      1.4s] flop-clustering k=10, iteration=1, phase=assignment, processed=28672/48769, emd_calls=286720
+[      1.6s] flop-clustering k=10, iteration=1, phase=assignment, processed=32768/48769, emd_calls=327680
+[      1.8s] flop-clustering k=10, iteration=1, phase=assignment, processed=36864/48769, emd_calls=368640
+[      2.0s] flop-clustering k=10, iteration=1, phase=assignment, processed=40960/48769, emd_calls=409600
+[      2.2s] flop-clustering k=10, iteration=1, phase=assignment, processed=45056/48769, emd_calls=450560
+[      2.5s] flop-clustering k=10, iteration=1, phase=assignment, processed=48769/48769, emd_calls=487690
+[      3.1s] flop-clustering k=10, iteration=1, phase=objective-after-update, objective_before=0.063907511, objective_after=0.055623473
+[      3.1s] flop-clustering k=10, iteration=2, phase=assignment, start
+[      3.4s] flop-clustering k=10, iteration=2, phase=assignment, processed=4096/48769, emd_calls=40960
+[      3.7s] flop-clustering k=10, iteration=2, phase=assignment, processed=8192/48769, emd_calls=81920
+[      4.0s] flop-clustering k=10, iteration=2, phase=assignment, processed=12288/48769, emd_calls=122880
+[      4.3s] flop-clustering k=10, iteration=2, phase=assignment, processed=16384/48769, emd_calls=163840
+[      4.6s] flop-clustering k=10, iteration=2, phase=assignment, processed=20480/48769, emd_calls=204800
+[      4.9s] flop-clustering k=10, iteration=2, phase=assignment, processed=24576/48769, emd_calls=245760
+[      5.3s] flop-clustering k=10, iteration=2, phase=assignment, processed=28672/48769, emd_calls=286720
+[      5.6s] flop-clustering k=10, iteration=2, phase=assignment, processed=32768/48769, emd_calls=327680
+[      5.9s] flop-clustering k=10, iteration=2, phase=assignment, processed=36864/48769, emd_calls=368640
+[      6.2s] flop-clustering k=10, iteration=2, phase=assignment, processed=40960/48769, emd_calls=409600
+[      6.5s] flop-clustering k=10, iteration=2, phase=assignment, processed=45056/48769, emd_calls=450560
+[      6.9s] flop-clustering k=10, iteration=2, phase=assignment, processed=48769/48769, emd_calls=487690
+[      7.5s] flop-clustering k=10, iteration=2, phase=objective-after-update, objective_before=0.052650591, objective_after=0.051060253
+[      7.5s] flop-clustering k=10, iteration=3, phase=assignment, start
+[      7.9s] flop-clustering k=10, iteration=3, phase=assignment, processed=4096/48769, emd_calls=40960
+[      8.2s] flop-clustering k=10, iteration=3, phase=assignment, processed=8192/48769, emd_calls=81920
+[      8.4s] flop-clustering k=10, iteration=3, phase=assignment, processed=12288/48769, emd_calls=122880
+[      8.8s] flop-clustering k=10, iteration=3, phase=assignment, processed=16384/48769, emd_calls=163840
+[      9.1s] flop-clustering k=10, iteration=3, phase=assignment, processed=20480/48769, emd_calls=204800
+[      9.5s] flop-clustering k=10, iteration=3, phase=assignment, processed=24576/48769, emd_calls=245760
+[      9.8s] flop-clustering k=10, iteration=3, phase=assignment, processed=28672/48769, emd_calls=286720
+[     10.1s] flop-clustering k=10, iteration=3, phase=assignment, processed=32768/48769, emd_calls=327680
+[     10.4s] flop-clustering k=10, iteration=3, phase=assignment, processed=36864/48769, emd_calls=368640
+[     10.7s] flop-clustering k=10, iteration=3, phase=assignment, processed=40960/48769, emd_calls=409600
+[     11.0s] flop-clustering k=10, iteration=3, phase=assignment, processed=45056/48769, emd_calls=450560
+[     11.5s] flop-clustering k=10, iteration=3, phase=assignment, processed=48769/48769, emd_calls=487690
+[     12.1s] flop-clustering k=10, iteration=3, phase=objective-after-update, objective_before=0.050544267, objective_after=0.050343787
+[     12.1s] flop-clustering k=10, iteration=4, phase=assignment, start
+[     12.4s] flop-clustering k=10, iteration=4, phase=assignment, processed=4096/48769, emd_calls=40960
+[     12.7s] flop-clustering k=10, iteration=4, phase=assignment, processed=8192/48769, emd_calls=81920
+[     13.0s] flop-clustering k=10, iteration=4, phase=assignment, processed=12288/48769, emd_calls=122880
+[     13.2s] flop-clustering k=10, iteration=4, phase=assignment, processed=16384/48769, emd_calls=163840
+[     13.5s] flop-clustering k=10, iteration=4, phase=assignment, processed=20480/48769, emd_calls=204800
+[     13.8s] flop-clustering k=10, iteration=4, phase=assignment, processed=24576/48769, emd_calls=245760
+[     14.2s] flop-clustering k=10, iteration=4, phase=assignment, processed=28672/48769, emd_calls=286720
+[     14.5s] flop-clustering k=10, iteration=4, phase=assignment, processed=32768/48769, emd_calls=327680
+[     14.7s] flop-clustering k=10, iteration=4, phase=assignment, processed=36864/48769, emd_calls=368640
+[     15.1s] flop-clustering k=10, iteration=4, phase=assignment, processed=40960/48769, emd_calls=409600
+[     15.4s] flop-clustering k=10, iteration=4, phase=assignment, processed=45056/48769, emd_calls=450560
+[     15.8s] flop-clustering k=10, iteration=4, phase=assignment, processed=48769/48769, emd_calls=487690
+[     16.4s] flop-clustering k=10, iteration=4, phase=objective-after-update, objective_before=0.050105707, objective_after=0.049883614
+[     16.4s] flop-clustering k=10, iteration=5, phase=assignment, start
+[     16.7s] flop-clustering k=10, iteration=5, phase=assignment, processed=4096/48769, emd_calls=40960
+[     17.0s] flop-clustering k=10, iteration=5, phase=assignment, processed=8192/48769, emd_calls=81920
+[     17.3s] flop-clustering k=10, iteration=5, phase=assignment, processed=12288/48769, emd_calls=122880
+[     17.6s] flop-clustering k=10, iteration=5, phase=assignment, processed=16384/48769, emd_calls=163840
+[     17.9s] flop-clustering k=10, iteration=5, phase=assignment, processed=20480/48769, emd_calls=204800
+[     18.3s] flop-clustering k=10, iteration=5, phase=assignment, processed=24576/48769, emd_calls=245760
+[     18.6s] flop-clustering k=10, iteration=5, phase=assignment, processed=28672/48769, emd_calls=286720
+[     18.9s] flop-clustering k=10, iteration=5, phase=assignment, processed=32768/48769, emd_calls=327680
+[     19.2s] flop-clustering k=10, iteration=5, phase=assignment, processed=36864/48769, emd_calls=368640
+[     19.5s] flop-clustering k=10, iteration=5, phase=assignment, processed=40960/48769, emd_calls=409600
+[     19.9s] flop-clustering k=10, iteration=5, phase=assignment, processed=45056/48769, emd_calls=450560
+[     20.3s] flop-clustering k=10, iteration=5, phase=assignment, processed=48769/48769, emd_calls=487690
+[     20.9s] flop-clustering k=10, iteration=5, phase=objective-after-update, objective_before=0.049707419, objective_after=0.049388777
+[     20.9s] flop-clustering k=10, iteration=6, phase=assignment, start
+[     21.2s] flop-clustering k=10, iteration=6, phase=assignment, processed=4096/48769, emd_calls=40960
+[     21.5s] flop-clustering k=10, iteration=6, phase=assignment, processed=8192/48769, emd_calls=81920
+[     21.8s] flop-clustering k=10, iteration=6, phase=assignment, processed=12288/48769, emd_calls=122880
+[     22.1s] flop-clustering k=10, iteration=6, phase=assignment, processed=16384/48769, emd_calls=163840
+[     22.4s] flop-clustering k=10, iteration=6, phase=assignment, processed=20480/48769, emd_calls=204800
+[     22.7s] flop-clustering k=10, iteration=6, phase=assignment, processed=24576/48769, emd_calls=245760
+[     23.0s] flop-clustering k=10, iteration=6, phase=assignment, processed=28672/48769, emd_calls=286720
+[     23.3s] flop-clustering k=10, iteration=6, phase=assignment, processed=32768/48769, emd_calls=327680
+[     23.6s] flop-clustering k=10, iteration=6, phase=assignment, processed=36864/48769, emd_calls=368640
+[     23.9s] flop-clustering k=10, iteration=6, phase=assignment, processed=40960/48769, emd_calls=409600
+[     24.2s] flop-clustering k=10, iteration=6, phase=assignment, processed=45056/48769, emd_calls=450560
+[     24.5s] flop-clustering k=10, iteration=6, phase=assignment, processed=48769/48769, emd_calls=487690
+[     25.2s] flop-clustering k=10, iteration=6, phase=objective-after-update, objective_before=0.049313361, objective_after=0.049226017
+[     25.2s] flop-clustering k=10, iteration=7, phase=assignment, start
+[     25.5s] flop-clustering k=10, iteration=7, phase=assignment, processed=4096/48769, emd_calls=40960
+[     25.8s] flop-clustering k=10, iteration=7, phase=assignment, processed=8192/48769, emd_calls=81920
+[     26.1s] flop-clustering k=10, iteration=7, phase=assignment, processed=12288/48769, emd_calls=122880
+[     26.4s] flop-clustering k=10, iteration=7, phase=assignment, processed=16384/48769, emd_calls=163840
+[     26.7s] flop-clustering k=10, iteration=7, phase=assignment, processed=20480/48769, emd_calls=204800
+[     27.0s] flop-clustering k=10, iteration=7, phase=assignment, processed=24576/48769, emd_calls=245760
+[     27.4s] flop-clustering k=10, iteration=7, phase=assignment, processed=28672/48769, emd_calls=286720
+[     27.7s] flop-clustering k=10, iteration=7, phase=assignment, processed=32768/48769, emd_calls=327680
+[     28.0s] flop-clustering k=10, iteration=7, phase=assignment, processed=36864/48769, emd_calls=368640
+[     28.3s] flop-clustering k=10, iteration=7, phase=assignment, processed=40960/48769, emd_calls=409600
+[     28.6s] flop-clustering k=10, iteration=7, phase=assignment, processed=45056/48769, emd_calls=450560
+[     29.0s] flop-clustering k=10, iteration=7, phase=assignment, processed=48769/48769, emd_calls=487690
+[     29.6s] flop-clustering k=10, iteration=7, phase=objective-after-update, objective_before=0.049174407, objective_after=0.049078158
+[     29.6s] flop-clustering k=10, iteration=8, phase=assignment, start
+[     29.9s] flop-clustering k=10, iteration=8, phase=assignment, processed=4096/48769, emd_calls=40960
+[     30.2s] flop-clustering k=10, iteration=8, phase=assignment, processed=8192/48769, emd_calls=81920
+[     30.5s] flop-clustering k=10, iteration=8, phase=assignment, processed=12288/48769, emd_calls=122880
+[     30.8s] flop-clustering k=10, iteration=8, phase=assignment, processed=16384/48769, emd_calls=163840
+[     31.1s] flop-clustering k=10, iteration=8, phase=assignment, processed=20480/48769, emd_calls=204800
+[     31.4s] flop-clustering k=10, iteration=8, phase=assignment, processed=24576/48769, emd_calls=245760
+[     31.7s] flop-clustering k=10, iteration=8, phase=assignment, processed=28672/48769, emd_calls=286720
+[     32.0s] flop-clustering k=10, iteration=8, phase=assignment, processed=32768/48769, emd_calls=327680
+[     32.3s] flop-clustering k=10, iteration=8, phase=assignment, processed=36864/48769, emd_calls=368640
+[     32.6s] flop-clustering k=10, iteration=8, phase=assignment, processed=40960/48769, emd_calls=409600
+[     32.9s] flop-clustering k=10, iteration=8, phase=assignment, processed=45056/48769, emd_calls=450560
+[     33.4s] flop-clustering k=10, iteration=8, phase=assignment, processed=48769/48769, emd_calls=487690
+[     34.0s] flop-clustering k=10, iteration=8, phase=objective-after-update, objective_before=0.049030856, objective_after=0.048799330
+[     34.0s] flop-clustering k=10, iteration=9, phase=assignment, start
+[     34.3s] flop-clustering k=10, iteration=9, phase=assignment, processed=4096/48769, emd_calls=40960
+[     34.6s] flop-clustering k=10, iteration=9, phase=assignment, processed=8192/48769, emd_calls=81920
+[     34.9s] flop-clustering k=10, iteration=9, phase=assignment, processed=12288/48769, emd_calls=122880
+[     35.2s] flop-clustering k=10, iteration=9, phase=assignment, processed=16384/48769, emd_calls=163840
+[     35.6s] flop-clustering k=10, iteration=9, phase=assignment, processed=20480/48769, emd_calls=204800
+[     35.9s] flop-clustering k=10, iteration=9, phase=assignment, processed=24576/48769, emd_calls=245760
+[     36.2s] flop-clustering k=10, iteration=9, phase=assignment, processed=28672/48769, emd_calls=286720
+[     36.6s] flop-clustering k=10, iteration=9, phase=assignment, processed=32768/48769, emd_calls=327680
+[     36.9s] flop-clustering k=10, iteration=9, phase=assignment, processed=36864/48769, emd_calls=368640
+[     37.2s] flop-clustering k=10, iteration=9, phase=assignment, processed=40960/48769, emd_calls=409600
+[     37.6s] flop-clustering k=10, iteration=9, phase=assignment, processed=45056/48769, emd_calls=450560
+[     38.0s] flop-clustering k=10, iteration=9, phase=assignment, processed=48769/48769, emd_calls=487690
+[     38.7s] flop-clustering k=10, iteration=9, phase=objective-after-update, objective_before=0.048749331, objective_after=0.048653352
+[     38.7s] flop-clustering k=10, iteration=10, phase=assignment, start
+[     38.9s] flop-clustering k=10, iteration=10, phase=assignment, processed=4096/48769, emd_calls=40960
+[     39.2s] flop-clustering k=10, iteration=10, phase=assignment, processed=8192/48769, emd_calls=81920
+[     39.5s] flop-clustering k=10, iteration=10, phase=assignment, processed=12288/48769, emd_calls=122880
+[     39.8s] flop-clustering k=10, iteration=10, phase=assignment, processed=16384/48769, emd_calls=163840
+[     40.2s] flop-clustering k=10, iteration=10, phase=assignment, processed=20480/48769, emd_calls=204800
+[     40.5s] flop-clustering k=10, iteration=10, phase=assignment, processed=24576/48769, emd_calls=245760
+[     40.8s] flop-clustering k=10, iteration=10, phase=assignment, processed=28672/48769, emd_calls=286720
+[     41.2s] flop-clustering k=10, iteration=10, phase=assignment, processed=32768/48769, emd_calls=327680
+[     41.5s] flop-clustering k=10, iteration=10, phase=assignment, processed=36864/48769, emd_calls=368640
+[     41.8s] flop-clustering k=10, iteration=10, phase=assignment, processed=40960/48769, emd_calls=409600
+[     42.1s] flop-clustering k=10, iteration=10, phase=assignment, processed=45056/48769, emd_calls=450560
+[     42.6s] flop-clustering k=10, iteration=10, phase=assignment, processed=48769/48769, emd_calls=487690
+[     43.2s] flop-clustering k=10, iteration=10, phase=objective-after-update, objective_before=0.048613353, objective_after=0.048532244
+[     43.2s] flop-clustering k=10, iteration=11, phase=assignment, start
+[     43.5s] flop-clustering k=10, iteration=11, phase=assignment, processed=4096/48769, emd_calls=40960
+[     43.8s] flop-clustering k=10, iteration=11, phase=assignment, processed=8192/48769, emd_calls=81920
+[     44.1s] flop-clustering k=10, iteration=11, phase=assignment, processed=12288/48769, emd_calls=122880
+[     44.4s] flop-clustering k=10, iteration=11, phase=assignment, processed=16384/48769, emd_calls=163840
+[     44.7s] flop-clustering k=10, iteration=11, phase=assignment, processed=20480/48769, emd_calls=204800
+[     45.0s] flop-clustering k=10, iteration=11, phase=assignment, processed=24576/48769, emd_calls=245760
+[     45.4s] flop-clustering k=10, iteration=11, phase=assignment, processed=28672/48769, emd_calls=286720
+[     45.7s] flop-clustering k=10, iteration=11, phase=assignment, processed=32768/48769, emd_calls=327680
+[     46.0s] flop-clustering k=10, iteration=11, phase=assignment, processed=36864/48769, emd_calls=368640
+[     46.3s] flop-clustering k=10, iteration=11, phase=assignment, processed=40960/48769, emd_calls=409600
+[     46.6s] flop-clustering k=10, iteration=11, phase=assignment, processed=45056/48769, emd_calls=450560
+[     46.9s] flop-clustering k=10, iteration=11, phase=assignment, processed=48769/48769, emd_calls=487690
+[     47.6s] flop-clustering k=10, iteration=11, phase=objective-after-update, objective_before=0.048505294, objective_after=0.048414662
+[     47.6s] flop-clustering k=10, iteration=12, phase=assignment, start
+[     47.8s] flop-clustering k=10, iteration=12, phase=assignment, processed=4096/48769, emd_calls=40960
+[     48.1s] flop-clustering k=10, iteration=12, phase=assignment, processed=8192/48769, emd_calls=81920
+[     48.4s] flop-clustering k=10, iteration=12, phase=assignment, processed=12288/48769, emd_calls=122880
+[     48.8s] flop-clustering k=10, iteration=12, phase=assignment, processed=16384/48769, emd_calls=163840
+[     49.1s] flop-clustering k=10, iteration=12, phase=assignment, processed=20480/48769, emd_calls=204800
+[     49.4s] flop-clustering k=10, iteration=12, phase=assignment, processed=24576/48769, emd_calls=245760
+[     49.7s] flop-clustering k=10, iteration=12, phase=assignment, processed=28672/48769, emd_calls=286720
+[     50.0s] flop-clustering k=10, iteration=12, phase=assignment, processed=32768/48769, emd_calls=327680
+[     50.3s] flop-clustering k=10, iteration=12, phase=assignment, processed=36864/48769, emd_calls=368640
+[     50.6s] flop-clustering k=10, iteration=12, phase=assignment, processed=40960/48769, emd_calls=409600
+[     51.0s] flop-clustering k=10, iteration=12, phase=assignment, processed=45056/48769, emd_calls=450560
+[     51.3s] flop-clustering k=10, iteration=12, phase=assignment, processed=48769/48769, emd_calls=487690
+[     52.0s] flop-clustering k=10, iteration=12, phase=objective-after-update, objective_before=0.048385884, objective_after=0.048330241
+[     52.0s] flop-clustering k=10, iteration=13, phase=assignment, start
+[     52.3s] flop-clustering k=10, iteration=13, phase=assignment, processed=4096/48769, emd_calls=40960
+[     52.5s] flop-clustering k=10, iteration=13, phase=assignment, processed=8192/48769, emd_calls=81920
+[     52.8s] flop-clustering k=10, iteration=13, phase=assignment, processed=12288/48769, emd_calls=122880
+[     53.1s] flop-clustering k=10, iteration=13, phase=assignment, processed=16384/48769, emd_calls=163840
+[     53.4s] flop-clustering k=10, iteration=13, phase=assignment, processed=20480/48769, emd_calls=204800
+[     53.8s] flop-clustering k=10, iteration=13, phase=assignment, processed=24576/48769, emd_calls=245760
+[     54.1s] flop-clustering k=10, iteration=13, phase=assignment, processed=28672/48769, emd_calls=286720
+[     54.4s] flop-clustering k=10, iteration=13, phase=assignment, processed=32768/48769, emd_calls=327680
+[     54.7s] flop-clustering k=10, iteration=13, phase=assignment, processed=36864/48769, emd_calls=368640
+[     55.0s] flop-clustering k=10, iteration=13, phase=assignment, processed=40960/48769, emd_calls=409600
+[     55.3s] flop-clustering k=10, iteration=13, phase=assignment, processed=45056/48769, emd_calls=450560
+[     55.7s] flop-clustering k=10, iteration=13, phase=assignment, processed=48769/48769, emd_calls=487690
+[     56.3s] flop-clustering k=10, iteration=13, phase=objective-after-update, objective_before=0.048305803, objective_after=0.048283662
+[     56.3s] flop-clustering k=10, iteration=14, phase=assignment, start
+[     56.6s] flop-clustering k=10, iteration=14, phase=assignment, processed=4096/48769, emd_calls=40960
+[     56.9s] flop-clustering k=10, iteration=14, phase=assignment, processed=8192/48769, emd_calls=81920
+[     57.2s] flop-clustering k=10, iteration=14, phase=assignment, processed=12288/48769, emd_calls=122880
+[     57.5s] flop-clustering k=10, iteration=14, phase=assignment, processed=16384/48769, emd_calls=163840
+[     57.8s] flop-clustering k=10, iteration=14, phase=assignment, processed=20480/48769, emd_calls=204800
+[     58.1s] flop-clustering k=10, iteration=14, phase=assignment, processed=24576/48769, emd_calls=245760
+[     58.4s] flop-clustering k=10, iteration=14, phase=assignment, processed=28672/48769, emd_calls=286720
+[     58.7s] flop-clustering k=10, iteration=14, phase=assignment, processed=32768/48769, emd_calls=327680
+[     59.0s] flop-clustering k=10, iteration=14, phase=assignment, processed=36864/48769, emd_calls=368640
+[     59.3s] flop-clustering k=10, iteration=14, phase=assignment, processed=40960/48769, emd_calls=409600
+[     59.6s] flop-clustering k=10, iteration=14, phase=assignment, processed=45056/48769, emd_calls=450560
+[     60.0s] flop-clustering k=10, iteration=14, phase=assignment, processed=48769/48769, emd_calls=487690
+[     60.7s] flop-clustering k=10, iteration=14, phase=objective-after-update, objective_before=0.048260956, objective_after=0.048214540
+[     60.7s] flop-clustering k=10, iteration=15, phase=assignment, start
+[     60.9s] flop-clustering k=10, iteration=15, phase=assignment, processed=4096/48769, emd_calls=40960
+[     61.2s] flop-clustering k=10, iteration=15, phase=assignment, processed=8192/48769, emd_calls=81920
+[     61.5s] flop-clustering k=10, iteration=15, phase=assignment, processed=12288/48769, emd_calls=122880
+[     61.8s] flop-clustering k=10, iteration=15, phase=assignment, processed=16384/48769, emd_calls=163840
+[     62.1s] flop-clustering k=10, iteration=15, phase=assignment, processed=20480/48769, emd_calls=204800
+[     62.5s] flop-clustering k=10, iteration=15, phase=assignment, processed=24576/48769, emd_calls=245760
+[     62.8s] flop-clustering k=10, iteration=15, phase=assignment, processed=28672/48769, emd_calls=286720
+[     63.1s] flop-clustering k=10, iteration=15, phase=assignment, processed=32768/48769, emd_calls=327680
+[     63.3s] flop-clustering k=10, iteration=15, phase=assignment, processed=36864/48769, emd_calls=368640
+[     63.6s] flop-clustering k=10, iteration=15, phase=assignment, processed=40960/48769, emd_calls=409600
+[     63.9s] flop-clustering k=10, iteration=15, phase=assignment, processed=45056/48769, emd_calls=450560
+[     64.3s] flop-clustering k=10, iteration=15, phase=assignment, processed=48769/48769, emd_calls=487690
+[     65.0s] flop-clustering k=10, iteration=15, phase=objective-after-update, objective_before=0.048199336, objective_after=0.048156629
+[     65.0s] flop-clustering k=10, iteration=16, phase=assignment, start
+[     65.2s] flop-clustering k=10, iteration=16, phase=assignment, processed=4096/48769, emd_calls=40960
+[     65.6s] flop-clustering k=10, iteration=16, phase=assignment, processed=8192/48769, emd_calls=81920
+[     65.8s] flop-clustering k=10, iteration=16, phase=assignment, processed=12288/48769, emd_calls=122880
+[     66.2s] flop-clustering k=10, iteration=16, phase=assignment, processed=16384/48769, emd_calls=163840
+[     66.5s] flop-clustering k=10, iteration=16, phase=assignment, processed=20480/48769, emd_calls=204800
+[     66.8s] flop-clustering k=10, iteration=16, phase=assignment, processed=24576/48769, emd_calls=245760
+[     67.2s] flop-clustering k=10, iteration=16, phase=assignment, processed=28672/48769, emd_calls=286720
+[     67.5s] flop-clustering k=10, iteration=16, phase=assignment, processed=32768/48769, emd_calls=327680
+[     67.8s] flop-clustering k=10, iteration=16, phase=assignment, processed=36864/48769, emd_calls=368640
+[     68.1s] flop-clustering k=10, iteration=16, phase=assignment, processed=40960/48769, emd_calls=409600
+[     68.4s] flop-clustering k=10, iteration=16, phase=assignment, processed=45056/48769, emd_calls=450560
+[     68.8s] flop-clustering k=10, iteration=16, phase=assignment, processed=48769/48769, emd_calls=487690
+[     69.4s] flop-clustering k=10, iteration=16, phase=objective-after-update, objective_before=0.048146125, objective_after=0.048125804
+[     69.4s] flop-clustering k=10, iteration=17, phase=assignment, start
+[     69.7s] flop-clustering k=10, iteration=17, phase=assignment, processed=4096/48769, emd_calls=40960
+[     70.0s] flop-clustering k=10, iteration=17, phase=assignment, processed=8192/48769, emd_calls=81920
+[     70.3s] flop-clustering k=10, iteration=17, phase=assignment, processed=12288/48769, emd_calls=122880
+[     70.6s] flop-clustering k=10, iteration=17, phase=assignment, processed=16384/48769, emd_calls=163840
+[     70.9s] flop-clustering k=10, iteration=17, phase=assignment, processed=20480/48769, emd_calls=204800
+[     71.2s] flop-clustering k=10, iteration=17, phase=assignment, processed=24576/48769, emd_calls=245760
+[     71.5s] flop-clustering k=10, iteration=17, phase=assignment, processed=28672/48769, emd_calls=286720
+[     71.8s] flop-clustering k=10, iteration=17, phase=assignment, processed=32768/48769, emd_calls=327680
+[     72.1s] flop-clustering k=10, iteration=17, phase=assignment, processed=36864/48769, emd_calls=368640
+[     72.4s] flop-clustering k=10, iteration=17, phase=assignment, processed=40960/48769, emd_calls=409600
+[     72.7s] flop-clustering k=10, iteration=17, phase=assignment, processed=45056/48769, emd_calls=450560
+[     73.1s] flop-clustering k=10, iteration=17, phase=assignment, processed=48769/48769, emd_calls=487690
+[     73.8s] flop-clustering k=10, iteration=17, phase=objective-after-update, objective_before=0.048114648, objective_after=0.048119673
+[     73.8s] flop-clustering k=10, iteration=18, phase=assignment, start
+[     74.1s] flop-clustering k=10, iteration=18, phase=assignment, processed=4096/48769, emd_calls=40960
+[     74.4s] flop-clustering k=10, iteration=18, phase=assignment, processed=8192/48769, emd_calls=81920
+[     74.7s] flop-clustering k=10, iteration=18, phase=assignment, processed=12288/48769, emd_calls=122880
+[     75.0s] flop-clustering k=10, iteration=18, phase=assignment, processed=16384/48769, emd_calls=163840
+[     75.3s] flop-clustering k=10, iteration=18, phase=assignment, processed=20480/48769, emd_calls=204800
+[     75.6s] flop-clustering k=10, iteration=18, phase=assignment, processed=24576/48769, emd_calls=245760
+[     75.9s] flop-clustering k=10, iteration=18, phase=assignment, processed=28672/48769, emd_calls=286720
+[     76.2s] flop-clustering k=10, iteration=18, phase=assignment, processed=32768/48769, emd_calls=327680
+[     76.5s] flop-clustering k=10, iteration=18, phase=assignment, processed=36864/48769, emd_calls=368640
+[     76.9s] flop-clustering k=10, iteration=18, phase=assignment, processed=40960/48769, emd_calls=409600
+[     77.2s] flop-clustering k=10, iteration=18, phase=assignment, processed=45056/48769, emd_calls=450560
+[     77.5s] flop-clustering k=10, iteration=18, phase=assignment, processed=48769/48769, emd_calls=487690
+[     78.2s] flop-clustering k=10, iteration=18, phase=objective-after-update, objective_before=0.048107992, objective_after=0.048087095
+[     78.2s] flop-clustering k=10, iteration=19, phase=assignment, start
+[     78.4s] flop-clustering k=10, iteration=19, phase=assignment, processed=4096/48769, emd_calls=40960
+[     78.7s] flop-clustering k=10, iteration=19, phase=assignment, processed=8192/48769, emd_calls=81920
+[     79.0s] flop-clustering k=10, iteration=19, phase=assignment, processed=12288/48769, emd_calls=122880
+[     79.3s] flop-clustering k=10, iteration=19, phase=assignment, processed=16384/48769, emd_calls=163840
+[     79.6s] flop-clustering k=10, iteration=19, phase=assignment, processed=20480/48769, emd_calls=204800
+[     79.9s] flop-clustering k=10, iteration=19, phase=assignment, processed=24576/48769, emd_calls=245760
+[     80.3s] flop-clustering k=10, iteration=19, phase=assignment, processed=28672/48769, emd_calls=286720
+[     80.6s] flop-clustering k=10, iteration=19, phase=assignment, processed=32768/48769, emd_calls=327680
+[     80.9s] flop-clustering k=10, iteration=19, phase=assignment, processed=36864/48769, emd_calls=368640
+[     81.2s] flop-clustering k=10, iteration=19, phase=assignment, processed=40960/48769, emd_calls=409600
+[     81.5s] flop-clustering k=10, iteration=19, phase=assignment, processed=45056/48769, emd_calls=450560
+[     81.9s] flop-clustering k=10, iteration=19, phase=assignment, processed=48769/48769, emd_calls=487690
+[     82.5s] flop-clustering k=10, iteration=19, phase=objective-after-update, objective_before=0.048073581, objective_after=0.048081562
+[     82.5s] flop-clustering k=10, iteration=20, phase=assignment, start
+[     82.8s] flop-clustering k=10, iteration=20, phase=assignment, processed=4096/48769, emd_calls=40960
+[     83.1s] flop-clustering k=10, iteration=20, phase=assignment, processed=8192/48769, emd_calls=81920
+[     83.4s] flop-clustering k=10, iteration=20, phase=assignment, processed=12288/48769, emd_calls=122880
+[     83.7s] flop-clustering k=10, iteration=20, phase=assignment, processed=16384/48769, emd_calls=163840
+[     84.0s] flop-clustering k=10, iteration=20, phase=assignment, processed=20480/48769, emd_calls=204800
+[     84.3s] flop-clustering k=10, iteration=20, phase=assignment, processed=24576/48769, emd_calls=245760
+[     84.6s] flop-clustering k=10, iteration=20, phase=assignment, processed=28672/48769, emd_calls=286720
+[     84.9s] flop-clustering k=10, iteration=20, phase=assignment, processed=32768/48769, emd_calls=327680
+[     85.2s] flop-clustering k=10, iteration=20, phase=assignment, processed=36864/48769, emd_calls=368640
+[     85.5s] flop-clustering k=10, iteration=20, phase=assignment, processed=40960/48769, emd_calls=409600
+[     85.8s] flop-clustering k=10, iteration=20, phase=assignment, processed=45056/48769, emd_calls=450560
+[     86.2s] flop-clustering k=10, iteration=20, phase=assignment, processed=48769/48769, emd_calls=487690
+[     86.8s] flop-clustering k=10, iteration=20, phase=objective-after-update, objective_before=0.048073848, objective_after=0.047905417
+[     86.8s] flop-clustering k=10, iteration=21, phase=assignment, start
+[     87.2s] flop-clustering k=10, iteration=21, phase=assignment, processed=4096/48769, emd_calls=40960
+[     87.5s] flop-clustering k=10, iteration=21, phase=assignment, processed=8192/48769, emd_calls=81920
+[     87.8s] flop-clustering k=10, iteration=21, phase=assignment, processed=12288/48769, emd_calls=122880
+[     88.1s] flop-clustering k=10, iteration=21, phase=assignment, processed=16384/48769, emd_calls=163840
+[     88.4s] flop-clustering k=10, iteration=21, phase=assignment, processed=20480/48769, emd_calls=204800
+[     88.7s] flop-clustering k=10, iteration=21, phase=assignment, processed=24576/48769, emd_calls=245760
+[     89.1s] flop-clustering k=10, iteration=21, phase=assignment, processed=28672/48769, emd_calls=286720
+[     89.4s] flop-clustering k=10, iteration=21, phase=assignment, processed=32768/48769, emd_calls=327680
+[     89.7s] flop-clustering k=10, iteration=21, phase=assignment, processed=36864/48769, emd_calls=368640
+[     90.0s] flop-clustering k=10, iteration=21, phase=assignment, processed=40960/48769, emd_calls=409600
+[     90.3s] flop-clustering k=10, iteration=21, phase=assignment, processed=45056/48769, emd_calls=450560
+[     90.7s] flop-clustering k=10, iteration=21, phase=assignment, processed=48769/48769, emd_calls=487690
+[     91.4s] flop-clustering k=10, iteration=21, phase=objective-after-update, objective_before=0.047844825, objective_after=0.047697389
+[     91.4s] flop-clustering k=10, iteration=22, phase=assignment, start
+[     91.7s] flop-clustering k=10, iteration=22, phase=assignment, processed=4096/48769, emd_calls=40960
+[     92.0s] flop-clustering k=10, iteration=22, phase=assignment, processed=8192/48769, emd_calls=81920
+[     92.3s] flop-clustering k=10, iteration=22, phase=assignment, processed=12288/48769, emd_calls=122880
+[     92.7s] flop-clustering k=10, iteration=22, phase=assignment, processed=16384/48769, emd_calls=163840
+[     93.0s] flop-clustering k=10, iteration=22, phase=assignment, processed=20480/48769, emd_calls=204800
+[     93.3s] flop-clustering k=10, iteration=22, phase=assignment, processed=24576/48769, emd_calls=245760
+[     93.7s] flop-clustering k=10, iteration=22, phase=assignment, processed=28672/48769, emd_calls=286720
+[     94.0s] flop-clustering k=10, iteration=22, phase=assignment, processed=32768/48769, emd_calls=327680
+[     94.3s] flop-clustering k=10, iteration=22, phase=assignment, processed=36864/48769, emd_calls=368640
+[     94.6s] flop-clustering k=10, iteration=22, phase=assignment, processed=40960/48769, emd_calls=409600
+[     95.0s] flop-clustering k=10, iteration=22, phase=assignment, processed=45056/48769, emd_calls=450560
+[     95.4s] flop-clustering k=10, iteration=22, phase=assignment, processed=48769/48769, emd_calls=487690
+[     96.1s] flop-clustering k=10, iteration=22, phase=objective-after-update, objective_before=0.047645450, objective_after=0.047489678
+[     96.1s] flop-clustering k=10, iteration=23, phase=assignment, start
+[     96.4s] flop-clustering k=10, iteration=23, phase=assignment, processed=4096/48769, emd_calls=40960
+[     96.7s] flop-clustering k=10, iteration=23, phase=assignment, processed=8192/48769, emd_calls=81920
+[     96.9s] flop-clustering k=10, iteration=23, phase=assignment, processed=12288/48769, emd_calls=122880
+[     97.3s] flop-clustering k=10, iteration=23, phase=assignment, processed=16384/48769, emd_calls=163840
+[     97.6s] flop-clustering k=10, iteration=23, phase=assignment, processed=20480/48769, emd_calls=204800
+[     97.9s] flop-clustering k=10, iteration=23, phase=assignment, processed=24576/48769, emd_calls=245760
+[     98.3s] flop-clustering k=10, iteration=23, phase=assignment, processed=28672/48769, emd_calls=286720
+[     98.6s] flop-clustering k=10, iteration=23, phase=assignment, processed=32768/48769, emd_calls=327680
+[     98.9s] flop-clustering k=10, iteration=23, phase=assignment, processed=36864/48769, emd_calls=368640
+[     99.2s] flop-clustering k=10, iteration=23, phase=assignment, processed=40960/48769, emd_calls=409600
+[     99.5s] flop-clustering k=10, iteration=23, phase=assignment, processed=45056/48769, emd_calls=450560
+[     99.9s] flop-clustering k=10, iteration=23, phase=assignment, processed=48769/48769, emd_calls=487690
+[    100.5s] flop-clustering k=10, iteration=23, phase=objective-after-update, objective_before=0.047440494, objective_after=0.047287750
+[    100.5s] flop-clustering k=10, iteration=24, phase=assignment, start
+[    100.8s] flop-clustering k=10, iteration=24, phase=assignment, processed=4096/48769, emd_calls=40960
+[    101.1s] flop-clustering k=10, iteration=24, phase=assignment, processed=8192/48769, emd_calls=81920
+[    101.4s] flop-clustering k=10, iteration=24, phase=assignment, processed=12288/48769, emd_calls=122880
+[    101.7s] flop-clustering k=10, iteration=24, phase=assignment, processed=16384/48769, emd_calls=163840
+[    102.1s] flop-clustering k=10, iteration=24, phase=assignment, processed=20480/48769, emd_calls=204800
+[    102.4s] flop-clustering k=10, iteration=24, phase=assignment, processed=24576/48769, emd_calls=245760
+[    102.7s] flop-clustering k=10, iteration=24, phase=assignment, processed=28672/48769, emd_calls=286720
+[    103.0s] flop-clustering k=10, iteration=24, phase=assignment, processed=32768/48769, emd_calls=327680
+[    103.3s] flop-clustering k=10, iteration=24, phase=assignment, processed=36864/48769, emd_calls=368640
+[    103.6s] flop-clustering k=10, iteration=24, phase=assignment, processed=40960/48769, emd_calls=409600
+[    103.9s] flop-clustering k=10, iteration=24, phase=assignment, processed=45056/48769, emd_calls=450560
+[    104.3s] flop-clustering k=10, iteration=24, phase=assignment, processed=48769/48769, emd_calls=487690
+[    105.0s] flop-clustering k=10, iteration=24, phase=objective-after-update, objective_before=0.047233485, objective_after=0.047071106
+[    105.0s] flop-clustering k=10, iteration=25, phase=assignment, start
+[    105.3s] flop-clustering k=10, iteration=25, phase=assignment, processed=4096/48769, emd_calls=40960
+[    105.7s] flop-clustering k=10, iteration=25, phase=assignment, processed=8192/48769, emd_calls=81920
+[    106.0s] flop-clustering k=10, iteration=25, phase=assignment, processed=12288/48769, emd_calls=122880
+[    106.3s] flop-clustering k=10, iteration=25, phase=assignment, processed=16384/48769, emd_calls=163840
+[    106.6s] flop-clustering k=10, iteration=25, phase=assignment, processed=20480/48769, emd_calls=204800
+[    107.0s] flop-clustering k=10, iteration=25, phase=assignment, processed=24576/48769, emd_calls=245760
+[    107.3s] flop-clustering k=10, iteration=25, phase=assignment, processed=28672/48769, emd_calls=286720
+[    107.6s] flop-clustering k=10, iteration=25, phase=assignment, processed=32768/48769, emd_calls=327680
+[    107.9s] flop-clustering k=10, iteration=25, phase=assignment, processed=36864/48769, emd_calls=368640
+[    108.2s] flop-clustering k=10, iteration=25, phase=assignment, processed=40960/48769, emd_calls=409600
+[    108.5s] flop-clustering k=10, iteration=25, phase=assignment, processed=45056/48769, emd_calls=450560
+[    109.0s] flop-clustering k=10, iteration=25, phase=assignment, processed=48769/48769, emd_calls=487690
+[    109.6s] flop-clustering k=10, iteration=25, phase=objective-after-update, objective_before=0.047000047, objective_after=0.046775802
+[    109.6s] flop-clustering k=10, iteration=26, phase=assignment, start
+[    109.9s] flop-clustering k=10, iteration=26, phase=assignment, processed=4096/48769, emd_calls=40960
+[    110.2s] flop-clustering k=10, iteration=26, phase=assignment, processed=8192/48769, emd_calls=81920
+[    110.5s] flop-clustering k=10, iteration=26, phase=assignment, processed=12288/48769, emd_calls=122880
+[    110.8s] flop-clustering k=10, iteration=26, phase=assignment, processed=16384/48769, emd_calls=163840
+[    111.1s] flop-clustering k=10, iteration=26, phase=assignment, processed=20480/48769, emd_calls=204800
+[    111.5s] flop-clustering k=10, iteration=26, phase=assignment, processed=24576/48769, emd_calls=245760
+[    111.8s] flop-clustering k=10, iteration=26, phase=assignment, processed=28672/48769, emd_calls=286720
+[    112.1s] flop-clustering k=10, iteration=26, phase=assignment, processed=32768/48769, emd_calls=327680
+[    112.4s] flop-clustering k=10, iteration=26, phase=assignment, processed=36864/48769, emd_calls=368640
+[    112.7s] flop-clustering k=10, iteration=26, phase=assignment, processed=40960/48769, emd_calls=409600
+[    113.0s] flop-clustering k=10, iteration=26, phase=assignment, processed=45056/48769, emd_calls=450560
+[    113.5s] flop-clustering k=10, iteration=26, phase=assignment, processed=48769/48769, emd_calls=487690
+[    114.2s] flop-clustering k=10, iteration=26, phase=objective-after-update, objective_before=0.046716967, objective_after=0.046598830
+[    114.2s] flop-clustering k=10, iteration=27, phase=assignment, start
+[    114.5s] flop-clustering k=10, iteration=27, phase=assignment, processed=4096/48769, emd_calls=40960
+[    114.8s] flop-clustering k=10, iteration=27, phase=assignment, processed=8192/48769, emd_calls=81920
+[    115.1s] flop-clustering k=10, iteration=27, phase=assignment, processed=12288/48769, emd_calls=122880
+[    115.4s] flop-clustering k=10, iteration=27, phase=assignment, processed=16384/48769, emd_calls=163840
+[    115.7s] flop-clustering k=10, iteration=27, phase=assignment, processed=20480/48769, emd_calls=204800
+[    116.0s] flop-clustering k=10, iteration=27, phase=assignment, processed=24576/48769, emd_calls=245760
+[    116.3s] flop-clustering k=10, iteration=27, phase=assignment, processed=28672/48769, emd_calls=286720
+[    116.6s] flop-clustering k=10, iteration=27, phase=assignment, processed=32768/48769, emd_calls=327680
+[    116.9s] flop-clustering k=10, iteration=27, phase=assignment, processed=36864/48769, emd_calls=368640
+[    117.3s] flop-clustering k=10, iteration=27, phase=assignment, processed=40960/48769, emd_calls=409600
+[    117.6s] flop-clustering k=10, iteration=27, phase=assignment, processed=45056/48769, emd_calls=450560
+[    118.0s] flop-clustering k=10, iteration=27, phase=assignment, processed=48769/48769, emd_calls=487690
+[    118.6s] flop-clustering k=10, iteration=27, phase=objective-after-update, objective_before=0.046505168, objective_after=0.046444372
+[    118.6s] flop-clustering k=10, iteration=28, phase=assignment, start
+[    118.9s] flop-clustering k=10, iteration=28, phase=assignment, processed=4096/48769, emd_calls=40960
+[    119.2s] flop-clustering k=10, iteration=28, phase=assignment, processed=8192/48769, emd_calls=81920
+[    119.4s] flop-clustering k=10, iteration=28, phase=assignment, processed=12288/48769, emd_calls=122880
+[    119.8s] flop-clustering k=10, iteration=28, phase=assignment, processed=16384/48769, emd_calls=163840
+[    120.1s] flop-clustering k=10, iteration=28, phase=assignment, processed=20480/48769, emd_calls=204800
+[    120.4s] flop-clustering k=10, iteration=28, phase=assignment, processed=24576/48769, emd_calls=245760
+[    120.7s] flop-clustering k=10, iteration=28, phase=assignment, processed=28672/48769, emd_calls=286720
+[    121.0s] flop-clustering k=10, iteration=28, phase=assignment, processed=32768/48769, emd_calls=327680
+[    121.4s] flop-clustering k=10, iteration=28, phase=assignment, processed=36864/48769, emd_calls=368640
+[    121.7s] flop-clustering k=10, iteration=28, phase=assignment, processed=40960/48769, emd_calls=409600
+[    121.9s] flop-clustering k=10, iteration=28, phase=assignment, processed=45056/48769, emd_calls=450560
+[    122.3s] flop-clustering k=10, iteration=28, phase=assignment, processed=48769/48769, emd_calls=487690
+[    123.0s] flop-clustering k=10, iteration=28, phase=objective-after-update, objective_before=0.046423174, objective_after=0.046443296
+[    123.0s] flop-clustering k=10, iteration=29, phase=assignment, start
+[    123.3s] flop-clustering k=10, iteration=29, phase=assignment, processed=4096/48769, emd_calls=40960
+[    123.6s] flop-clustering k=10, iteration=29, phase=assignment, processed=8192/48769, emd_calls=81920
+[    123.9s] flop-clustering k=10, iteration=29, phase=assignment, processed=12288/48769, emd_calls=122880
+[    124.2s] flop-clustering k=10, iteration=29, phase=assignment, processed=16384/48769, emd_calls=163840
+[    124.5s] flop-clustering k=10, iteration=29, phase=assignment, processed=20480/48769, emd_calls=204800
+[    124.8s] flop-clustering k=10, iteration=29, phase=assignment, processed=24576/48769, emd_calls=245760
+[    125.1s] flop-clustering k=10, iteration=29, phase=assignment, processed=28672/48769, emd_calls=286720
+[    125.5s] flop-clustering k=10, iteration=29, phase=assignment, processed=32768/48769, emd_calls=327680
+[    125.8s] flop-clustering k=10, iteration=29, phase=assignment, processed=36864/48769, emd_calls=368640
+[    126.1s] flop-clustering k=10, iteration=29, phase=assignment, processed=40960/48769, emd_calls=409600
+[    126.4s] flop-clustering k=10, iteration=29, phase=assignment, processed=45056/48769, emd_calls=450560
+[    126.8s] flop-clustering k=10, iteration=29, phase=assignment, processed=48769/48769, emd_calls=487690
+[    127.5s] flop-clustering k=10, iteration=29, phase=objective-after-update, objective_before=0.046434893, objective_after=0.046456406
+[    127.5s] flop-clustering k=10, iteration=30, phase=assignment, start
+[    127.8s] flop-clustering k=10, iteration=30, phase=assignment, processed=4096/48769, emd_calls=40960
+[    128.1s] flop-clustering k=10, iteration=30, phase=assignment, processed=8192/48769, emd_calls=81920
+[    128.4s] flop-clustering k=10, iteration=30, phase=assignment, processed=12288/48769, emd_calls=122880
+[    128.7s] flop-clustering k=10, iteration=30, phase=assignment, processed=16384/48769, emd_calls=163840
+[    129.0s] flop-clustering k=10, iteration=30, phase=assignment, processed=20480/48769, emd_calls=204800
+[    129.3s] flop-clustering k=10, iteration=30, phase=assignment, processed=24576/48769, emd_calls=245760
+[    129.7s] flop-clustering k=10, iteration=30, phase=assignment, processed=28672/48769, emd_calls=286720
+[    129.9s] flop-clustering k=10, iteration=30, phase=assignment, processed=32768/48769, emd_calls=327680
+[    130.3s] flop-clustering k=10, iteration=30, phase=assignment, processed=36864/48769, emd_calls=368640
+[    130.6s] flop-clustering k=10, iteration=30, phase=assignment, processed=40960/48769, emd_calls=409600
+[    131.0s] flop-clustering k=10, iteration=30, phase=assignment, processed=45056/48769, emd_calls=450560
+[    131.4s] flop-clustering k=10, iteration=30, phase=assignment, processed=48769/48769, emd_calls=487690
+[    132.0s] flop-clustering k=10, iteration=30, phase=objective-after-update, objective_before=0.046447583, objective_after=0.046484410
+[    138.5s] flop-clustering k=10, iteration=1, objective_before=0.063907511, objective_after=0.055623473, moved_weight_fraction=1.000000000, occupied_buckets=10
+[    138.5s] flop-clustering k=10, iteration=2, objective_before=0.052650591, objective_after=0.051060253, moved_weight_fraction=0.183451363, occupied_buckets=10
+[    138.5s] flop-clustering k=10, iteration=3, objective_before=0.050544267, objective_after=0.050343787, moved_weight_fraction=0.074497354, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=4, objective_before=0.050105707, objective_after=0.049883614, moved_weight_fraction=0.049788360, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=5, objective_before=0.049707419, objective_after=0.049388777, moved_weight_fraction=0.045343915, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=6, objective_before=0.049313361, objective_after=0.049226017, moved_weight_fraction=0.029515670, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=7, objective_before=0.049174407, objective_after=0.049078158, moved_weight_fraction=0.028636549, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=8, objective_before=0.049030856, objective_after=0.048799330, moved_weight_fraction=0.030895401, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=9, objective_before=0.048749331, objective_after=0.048653352, moved_weight_fraction=0.023915344, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=10, objective_before=0.048613353, objective_after=0.048532244, moved_weight_fraction=0.021603582, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=11, objective_before=0.048505294, objective_after=0.048414662, moved_weight_fraction=0.017452177, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=12, objective_before=0.048385884, objective_after=0.048330241, moved_weight_fraction=0.020166870, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=13, objective_before=0.048305803, objective_after=0.048283662, moved_weight_fraction=0.017358567, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=14, objective_before=0.048260956, objective_after=0.048214540, moved_weight_fraction=0.016438746, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=15, objective_before=0.048199336, objective_after=0.048156629, moved_weight_fraction=0.012437932, occupied_buckets=10
+[    138.6s] flop-clustering k=10, iteration=16, objective_before=0.048146125, objective_after=0.048125804, moved_weight_fraction=0.011823362, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=17, objective_before=0.048114648, objective_after=0.048119673, moved_weight_fraction=0.012454212, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=18, objective_before=0.048107992, objective_after=0.048087095, moved_weight_fraction=0.012393162, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=19, objective_before=0.048073581, objective_after=0.048081562, moved_weight_fraction=0.011355311, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=20, objective_before=0.048073848, objective_after=0.047905417, moved_weight_fraction=0.013565324, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=21, objective_before=0.047844825, objective_after=0.047697389, moved_weight_fraction=0.021937322, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=22, objective_before=0.047645450, objective_after=0.047489678, moved_weight_fraction=0.020036630, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=23, objective_before=0.047440494, objective_after=0.047287750, moved_weight_fraction=0.024314204, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=24, objective_before=0.047233485, objective_after=0.047071106, moved_weight_fraction=0.020586081, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=25, objective_before=0.047000047, objective_after=0.046775802, moved_weight_fraction=0.019641840, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=26, objective_before=0.046716967, objective_after=0.046598830, moved_weight_fraction=0.022482702, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=27, objective_before=0.046505168, objective_after=0.046444372, moved_weight_fraction=0.024798535, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=28, objective_before=0.046423174, objective_after=0.046443296, moved_weight_fraction=0.014464794, occupied_buckets=10
+[    138.7s] flop-clustering k=10, iteration=29, objective_before=0.046434893, objective_after=0.046456406, moved_weight_fraction=0.009479039, occupied_buckets=10
+[    138.8s] flop-clustering k=10, iteration=30, objective_before=0.046447583, objective_after=0.046484410, moved_weight_fraction=0.007899878, occupied_buckets=10
+[    138.8s] flop-clustering k=10, final_assignment_diagnostic=true, changed_weight_fraction=0.005189255, objective=0.046481602
+[    138.8s] flop-clustering end k=10
+[    138.8s] write-flop-table start k=10
+[    138.8s] write-flop-table end k=10
+[    138.8s] complete potential-aware tables written

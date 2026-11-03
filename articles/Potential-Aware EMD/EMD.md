@@ -356,6 +356,24 @@ seed, общим `iterations=10`, `turn_iterations=50`, двумя потока�
 менялись. Полная сводка:
 `web_reports/potential-emd-r6-k20-flop-trajectory-probe-20261103.md`.
 
+### Production-контроль ranks=7, K=10: не принята финальная согласованность
+
+Ровно один новый launcher-контроль `ranks=7`, `K=10`, общим budget `10`,
+`turn_iterations=50`, `flop_iterations=30`, двумя потоками и seed
+`202610050003` завершился с exit code `0`, status `complete`, тремя таблицами
+и `summary.json`. SHA до сборки, перед запуском и в `summary.code_revision`
+совпал: `60dabdd7987b97ddc2f9e223eff62e1bab0d8fa8`; launcher подтвердил чистое
+дерево в обеих предзапусковых точках. Значение `summary.working_tree_dirty=true`
+объясняется созданным launcher неотслеживаемым каталогом результатов во время
+самого запуска.
+
+Однако финальная немутирующая диагностика не дала фактический ноль: turn
+`0.000019111`, flop `0.005189255`. Поэтому контроль не принят по своему
+критерию, хотя все objectives конечны, failure-dump и оставшиеся процессы
+отсутствуют. Повтор, увеличение budgets и изменение алгоритма не выполнялись.
+Полные objectives, SHA-256, профиль и максимумы памяти:
+`web_reports/potential-emd-r7-k10-turn50-flop30-seed-202610050003-control-20261103.md`.
+
 ### Воспроизводимость flop=30 с проверяемым provenance
 
 Ровно один полный production launcher-повтор `ranks=6`, `K=20`, общим
