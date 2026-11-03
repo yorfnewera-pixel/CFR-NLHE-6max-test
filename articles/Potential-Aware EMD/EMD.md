@@ -781,3 +781,17 @@ gate-control. Атомарный `checkpoint-30.bin` содержит точны
 побитовое совпадение полного состояния с историческим production-запуском,
 поскольку исторического checkpoint нет. Continuation 31–50 не выполнялся.
 Детали: `web_reports/potential-emd-r7-k10-flop-step30-capture-20261103.md`.
+
+### Test-only continuation flop R7/K10: шаги 31–50
+
+После отдельного согласования выполнен ровно один supervised continuation из
+проверенного checkpoint-30 на commit
+`1f8d730fb875f857107df711e47067d8a1bf9762`. River/turn и flop 1–30 не
+пересчитывались, production-таблицы и шаг 51 не запускались. На шаге 39
+обычная смена назначений пересекла прежний early-stop порог, но test-only
+прогон продолжился до явной границы 50. Final changed fraction стал signed
+zero на шаге 40; state words точно повторились на переходе `40→41` и далее
+не менялись. Checkpoint записан после каждого шага 31–50. Рост objective
+после update наблюдался на шагах 31–34 и 36–37, без вывода об ошибке
+решателя. Детали:
+`web_reports/potential-emd-r7-k10-flop-step30-continuation-20261103.md`.
