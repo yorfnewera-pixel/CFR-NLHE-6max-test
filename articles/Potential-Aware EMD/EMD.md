@@ -341,6 +341,27 @@ seed, общим `iterations=10`, `turn_iterations=50`, двумя потока�
 менялись. Полная сводка:
 `web_reports/potential-emd-r6-k20-flop-trajectory-probe-20261103.md`.
 
+### Воспроизводимость flop=30 с проверяемым provenance
+
+Ровно один полный production launcher-повтор `ranks=6`, `K=20`, общим
+budget `10`, `turn_iterations=50`, `flop_iterations=30`, двумя потоками,
+seed `202610050003`, timeout `600 с`, финальной диагностикой и профилем
+завершился с реальным exit code `0` и status `complete`. SHA до сборки, перед
+запуском и `summary.code_revision` совпали:
+`8b3ad288e6e873ad22d150d9381687c336b32946`; дерево в обеих проверках было
+чистым.
+
+Созданы три таблицы и `summary.json`, failure-dump отсутствует. Turn прошёл
+21 итерацию и финально согласован: objective `0.053350386`, нулевая финальная
+смена. Flop штатно остановился на 24-й итерации: objective `0.042501379`,
+нулевая финальная смена. Три SHA-256 и все доступные полные массивы objective
+точно совпали с предыдущим flop=30 контролем. Максимумы 393 внешних замеров:
+Private Bytes `33 058 816 B`, Working Set `32 305 152 B`; время генератора
+`392,9 с`. Это подтверждает воспроизводимость результата, но не восстанавливает
+задним числом provenance предыдущего запуска и не является заявлением об
+ускорении. Полная сводка:
+`web_reports/potential-emd-r6-k20-turn50-flop30-provenance-repro-20261103.md`.
+
 ### Отдельный production-бюджет flop
 
 Добавлен opt-in `--flop-iterations N` и параметр launcher
