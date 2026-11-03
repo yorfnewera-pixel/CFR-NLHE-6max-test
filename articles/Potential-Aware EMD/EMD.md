@@ -737,3 +737,21 @@ run выбрали ровно один test; actual завершился с `exi
 Созданы checkpoints 29–50, timeout не сработал, процессов не осталось.
 Replay 1–28, flop и production-таблицы не запускались. Детали:
 `web_reports/potential-emd-r7-k10-turn-checkpoint28-continuation-20261103.md`.
+
+### Production-контроль R7/K10 с новым turn termination gate
+
+Ровно один launcher-контроль на commit
+`80895882faf3fbfa293bf1553d124fc21b185566` с `ranks=7`, `K=10`, budgets
+`10/50/30`, двумя Rayon-потоками, seed `202610050003`, timeout `600 с`,
+финальной диагностикой и flop-профилем завершился с exit code `0` и status
+`complete`. Turn прошёл прежний пороговый шаг 28, на шаге 29 получил
+фактический signed zero финальной смены назначений и остановился как
+`EarlyStopConsistent` с `final_assignment_consistent=true`. Objectives
+шагов 1–28 побитово совпали с прежним R7/K10 production-контролем, а шаг 29
+— с test-only continuation.
+
+Flop исчерпал свой budget 30 с ненулевой финальной сменой назначений
+`0.005177045`; его алгоритм и budget не менялись. River hash совпал с
+прежним R7/K10, turn/flop hashes изменились и зафиксированы без требования
+совпадения. Повторов, иных seed и последующих запусков не выполнялось.
+Детали: `web_reports/potential-emd-r7-k10-turn50-flop30-gate-control-20261103.md`.
