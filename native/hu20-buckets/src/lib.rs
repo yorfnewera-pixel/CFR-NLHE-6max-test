@@ -665,6 +665,29 @@ fn emd_with_context(
 }
 
 /// Выбирает первый минимум, не материализуя временный список расстояний.
+fn emd_with_context_with_scratch(
+    phase: &'static str,
+    point_index: usize,
+    centroid_index: usize,
+    left: &[f32],
+    right: &[f32],
+    ground: &[f32],
+    dimension: usize,
+    scratch: &mut EmdScratch,
+) -> Result<f32, EmdContextError> {
+    try_emd_with_scratch(left, right, ground, dimension, scratch).map_err(|source| {
+        EmdContextError {
+            phase,
+            point_index,
+            centroid_index,
+            left: left.to_vec(),
+            right: right.to_vec(),
+            ground: ground.to_vec(),
+            source,
+        }
+    })
+}
+
 fn first_minimum_emd<I>(mut candidates: I) -> Result<(u16, f32), EmdContextError>
 where
     I: Iterator<Item = Result<(u16, f32), EmdContextError>>,
@@ -725,6 +748,7 @@ fn transport_residuals(
     (source_residual, demand_residual)
 }
 
+#[cfg(test)]
 fn reconstruct_path(
     previous: &[Option<(usize, usize)>],
     source: usize,
@@ -745,11 +769,74 @@ fn reconstruct_path(
     Ok(path)
 }
 
+fn reconstruct_path_into(
+    previous: &[Option<(usize, usize)>],
+    source: usize,
+    sink: usize,
+    path: &mut Vec<(usize, usize)>,
+    seen: &mut [bool],
+) -> Result<(), EmdError> {
+    path.clear();
+    seen.fill(false);
+    let mut node = sink;
+    while node != source {
+        if seen[node] {
+            return Err(EmdError::PredecessorCycle { node });
+        }
+        seen[node] = true;
+        let (from, edge) = previous[node].ok_or(EmdError::MissingPredecessor { node })?;
+        path.push((from, edge));
+        node = from;
+    }
+    Ok(())
+}
+
+/// Временные буферы точного EMD. Содержимое всегда сбрасывается перед расчётом;
+/// переиспользуется только выделенная память.
+#[derive(Default)]
+struct EmdScratch {
+    normalized_left: Vec<f64>,
+    normalized_right: Vec<f64>,
+    graph: Vec<Vec<FlowEdge>>,
+    potential: Vec<f64>,
+    distance: Vec<f64>,
+    previous: Vec<Option<(usize, usize)>>,
+    used: Vec<bool>,
+    path: Vec<(usize, usize)>,
+    seen: Vec<bool>,
+}
+
+impl EmdScratch {
+    fn reset(&mut self, dimension: usize) {
+        let nodes = 2 * dimension + 2;
+        self.normalized_left.clear();
+        self.normalized_right.clear();
+        self.graph.resize_with(nodes, Vec::new);
+        self.graph.truncate(nodes);
+        for edges in &mut self.graph {
+            edges.clear();
+        }
+        self.potential.clear();
+        self.potential.resize(nodes, 0.0);
+        self.distance.clear();
+        self.distance.resize(nodes, f64::INFINITY);
+        self.previous.clear();
+        self.previous.resize(nodes, None);
+        self.used.clear();
+        self.used.resize(nodes, false);
+        self.path.clear();
+        self.seen.clear();
+        self.seen.resize(nodes, false);
+    }
+}
+
 /// Точная стоимость переноса массы между двумя нормированными распределениями.
 ///
 /// Ошибки входа и нарушения численных инвариантов возвращаются явно, чтобы
 /// кластеризация не могла незаметно использовать подменённое расстояние.
-pub fn try_emd(
+#[cfg(test)]
+// Снимок дорефакторингового ядра commit bbca55febbcf63c483ac829b8241685b751a3779.
+fn try_emd_pre_scratch_reference(
     left: &[f32],
     right: &[f32],
     ground: &[f32],
@@ -896,6 +983,207 @@ pub fn try_emd(
         return Err(EmdError::IterationLimit);
     }
     let (source_residual, demand_residual) = transport_residuals(&graph, source, sink, dimension);
+    if source_residual > completion_tolerance || demand_residual > completion_tolerance {
+        return Err(EmdError::IncompleteTransport);
+    }
+    let delivered_by_residual = transport_mass - source_residual;
+    if !delivered_by_residual.is_finite()
+        || (transport_mass - delivered_by_residual).abs() > completion_tolerance
+    {
+        return Err(EmdError::IncompleteTransport);
+    }
+    if !total_cost.is_finite() {
+        return Err(EmdError::NonFiniteResult);
+    }
+    let result = total_cost as f32;
+    if !result.is_finite() {
+        return Err(EmdError::NonFiniteResult);
+    }
+    Ok(result)
+}
+
+/// Точная стоимость переноса массы между двумя нормированными распределениями.
+///
+/// Публичный контракт сохраняет независимость вызова; горячий путь
+/// кластеризации использует тот же solver с локально переиспользуемым scratch.
+pub fn try_emd(
+    left: &[f32],
+    right: &[f32],
+    ground: &[f32],
+    dimension: usize,
+) -> Result<f32, EmdError> {
+    let mut scratch = EmdScratch::default();
+    try_emd_with_scratch(left, right, ground, dimension, &mut scratch)
+}
+
+fn try_emd_with_scratch(
+    left: &[f32],
+    right: &[f32],
+    ground: &[f32],
+    dimension: usize,
+    scratch: &mut EmdScratch,
+) -> Result<f32, EmdError> {
+    assert!(left.len() == dimension && right.len() == dimension);
+    assert!(ground.len() == dimension * dimension);
+    for (side, distribution) in [("left", left), ("right", right)] {
+        for (index, &mass) in distribution.iter().enumerate() {
+            if !mass.is_finite() {
+                return Err(EmdError::NonFiniteMass { side, index });
+            }
+            if mass < 0.0 {
+                return Err(EmdError::NegativeMass { side, index });
+            }
+        }
+    }
+    for (index, &distance) in ground.iter().enumerate() {
+        if !distance.is_finite() {
+            return Err(EmdError::NonFiniteGroundDistance { index });
+        }
+        if distance < 0.0 {
+            return Err(EmdError::NegativeGroundDistance { index });
+        }
+    }
+    let left_mass: f64 = left.iter().map(|&x| x as f64).sum();
+    let right_mass: f64 = right.iter().map(|&x| x as f64).sum();
+    if left_mass <= 0.0 {
+        return Err(EmdError::NonPositiveTotalMass { side: "left" });
+    }
+    if right_mass <= 0.0 {
+        return Err(EmdError::NonPositiveTotalMass { side: "right" });
+    }
+
+    scratch.reset(dimension);
+    scratch
+        .normalized_left
+        .extend(left.iter().map(|&value| value as f64 / left_mass));
+    scratch
+        .normalized_right
+        .extend(right.iter().map(|&value| value as f64 / right_mass));
+    let transport_mass = scratch
+        .normalized_left
+        .iter()
+        .sum::<f64>()
+        .min(scratch.normalized_right.iter().sum::<f64>());
+    let source = 2 * dimension;
+    let sink = source + 1;
+    for i in 0..dimension {
+        let source_mass = scratch.normalized_left[i];
+        add_flow_edge(&mut scratch.graph, source, i, source_mass, 0.0);
+        add_flow_edge(
+            &mut scratch.graph,
+            dimension + i,
+            sink,
+            scratch.normalized_right[i],
+            0.0,
+        );
+        for j in 0..dimension {
+            add_flow_edge(
+                &mut scratch.graph,
+                i,
+                dimension + j,
+                1.0,
+                ground[i * dimension + j] as f64,
+            );
+        }
+    }
+    let completion_tolerance = 64.0 * f64::EPSILON * dimension as f64;
+    let iteration_limit =
+        4usize.saturating_mul(scratch.graph.len().saturating_mul(scratch.graph.len()));
+    let mut total_cost = 0.0;
+    let mut delivered = 0.0;
+    let mut complete = false;
+    for _ in 0..iteration_limit {
+        let (source_residual, demand_residual) =
+            transport_residuals(&scratch.graph, source, sink, dimension);
+        if source_residual <= completion_tolerance && demand_residual <= completion_tolerance {
+            complete = true;
+            break;
+        }
+        scratch.distance.fill(f64::INFINITY);
+        scratch.previous.fill(None);
+        scratch.used.fill(false);
+        scratch.distance[source] = 0.0;
+        for _ in 0..scratch.graph.len() {
+            let next = (0..scratch.graph.len())
+                .filter(|&v| !scratch.used[v])
+                .min_by(|&a, &b| {
+                    scratch.distance[a]
+                        .partial_cmp(&scratch.distance[b])
+                        .unwrap()
+                })
+                .unwrap();
+            if !scratch.distance[next].is_finite() {
+                break;
+            }
+            scratch.used[next] = true;
+            if next == sink {
+                continue;
+            }
+            for (edge_index, edge) in scratch.graph[next].iter().enumerate() {
+                if edge.capacity <= 0.0 || scratch.used[edge.to] {
+                    continue;
+                }
+                let candidate = scratch.distance[next] + edge.cost + scratch.potential[next]
+                    - scratch.potential[edge.to];
+                if candidate < scratch.distance[edge.to] {
+                    scratch.distance[edge.to] = candidate;
+                    scratch.previous[edge.to] = Some((next, edge_index));
+                }
+            }
+        }
+        if !scratch.used[sink] {
+            return Err(EmdError::DisconnectedTransportGraph);
+        }
+        for v in 0..scratch.graph.len() {
+            if scratch.used[v] {
+                scratch.potential[v] += scratch.distance[v];
+            }
+        }
+        reconstruct_path_into(
+            &scratch.previous,
+            source,
+            sink,
+            &mut scratch.path,
+            &mut scratch.seen,
+        )?;
+        let mut amount = f64::INFINITY;
+        for &(from, edge) in &scratch.path {
+            amount = amount.min(scratch.graph[from][edge].capacity);
+        }
+        if !amount.is_finite() || amount <= 0.0 {
+            return Err(EmdError::InvalidAugmentation);
+        }
+        let mut residual_capacity_changed = false;
+        let mut node = sink;
+        for &(from, edge) in &scratch.path {
+            let reverse = scratch.graph[from][edge].reverse;
+            total_cost += amount * scratch.graph[from][edge].cost;
+            let forward_capacity_before = scratch.graph[from][edge].capacity;
+            let reverse_capacity_before = scratch.graph[node][reverse].capacity;
+            scratch.graph[from][edge].capacity -= amount;
+            scratch.graph[node][reverse].capacity += amount;
+            residual_capacity_changed |= scratch.graph[from][edge].capacity
+                != forward_capacity_before
+                || scratch.graph[node][reverse].capacity != reverse_capacity_before;
+            node = from;
+        }
+        delivered += amount;
+        if !delivered.is_finite() || !residual_capacity_changed {
+            return Err(EmdError::NoProgress);
+        }
+    }
+    if !complete {
+        let (source_residual, demand_residual) =
+            transport_residuals(&scratch.graph, source, sink, dimension);
+        if source_residual <= completion_tolerance && demand_residual <= completion_tolerance {
+            complete = true;
+        }
+    }
+    if !complete {
+        return Err(EmdError::IterationLimit);
+    }
+    let (source_residual, demand_residual) =
+        transport_residuals(&scratch.graph, source, sink, dimension);
     if source_residual > completion_tolerance || demand_residual > completion_tolerance {
         return Err(EmdError::IncompleteTransport);
     }
@@ -1286,14 +1574,23 @@ fn kmeans_emd_profiled_with_assignment(
         let assignment_started = profile_enabled.then(Instant::now);
         let assigned: Vec<(u16, f32, usize)> = (0..n)
             .into_par_iter()
-            .map(|index| {
+            .map_init(EmdScratch::default, |scratch, index| {
                 let point = row(index);
                 let mut emd_calls = 0usize;
                 let candidates = (0..k).map(|cluster| {
                     let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
                     emd_calls += 1;
-                    emd_with_context("assignment", index, cluster, point, centroid, ground, dim)
-                        .map(|distance| (cluster as u16, distance))
+                    emd_with_context_with_scratch(
+                        "assignment",
+                        index,
+                        cluster,
+                        point,
+                        centroid,
+                        ground,
+                        dim,
+                        scratch,
+                    )
+                    .map(|distance| (cluster as u16, distance))
                 });
                 let result = match assignment_selection {
                     EmdAssignmentSelection::Streaming => first_minimum_emd(candidates),
@@ -1362,10 +1659,11 @@ fn kmeans_emd_profiled_with_assignment(
         }
         let centroid_update_wall_clock = centroid_update_started.map(|started| started.elapsed());
         let objective_after_update_started = profile_enabled.then(Instant::now);
+        let mut objective_after_update_scratch = EmdScratch::default();
         let objective_after_update_entries = (0..n)
             .map(|index| {
                 let cluster = assignment[index] as usize;
-                emd_with_context(
+                emd_with_context_with_scratch(
                     "objective-after-update",
                     index,
                     cluster,
@@ -1373,6 +1671,7 @@ fn kmeans_emd_profiled_with_assignment(
                     &centroids[cluster * dim..(cluster + 1) * dim],
                     ground,
                     dim,
+                    &mut objective_after_update_scratch,
                 )
                 .map(|distance| (distance as f64 * weight[index] as f64, 1usize))
             })
@@ -1429,14 +1728,14 @@ fn kmeans_emd_profiled_with_assignment(
         if diagnose_final_assignment {
             let reassigned: Vec<(u16, f32, usize)> = (0..n)
                 .into_par_iter()
-                .map(|index| {
+                .map_init(EmdScratch::default, |scratch, index| {
                     let point = row(index);
                     let mut emd_calls = 0usize;
                     let distances: Result<Vec<(u16, f32)>, EmdContextError> = (0..k)
                         .map(|cluster| {
                             let centroid = &centroids[cluster * dim..(cluster + 1) * dim];
                             emd_calls += 1;
-                            emd_with_context(
+                            emd_with_context_with_scratch(
                                 "final-assignment-diagnostic",
                                 index,
                                 cluster,
@@ -1444,6 +1743,7 @@ fn kmeans_emd_profiled_with_assignment(
                                 centroid,
                                 ground,
                                 dim,
+                                scratch,
                             )
                             .map(|distance| (cluster as u16, distance))
                         })
@@ -3955,6 +4255,163 @@ mod tests {
         let ground = vec![0.0, 2.0, 2.0, 0.0];
         assert!((emd(&[1.0, 0.0], &[0.0, 1.0], &ground, 2) - 2.0).abs() < 1e-6);
         assert!((emd(&[0.5, 0.5], &[0.0, 1.0], &ground, 2) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn emd_scratch_matches_pre_refactor_reference_after_reuse_and_error() {
+        let ground2 = [0.0, 1.0, 1.0, 0.0];
+        let ground3 = [0.0, 1.0, 2.0, 1.0, 0.0, 1.0, 2.0, 1.0, 0.0];
+        let mut scratch = EmdScratch::default();
+
+        let cases = [
+            (&[1.0, 0.0][..], &[0.25, 0.75][..], &ground2[..], 2usize),
+            (
+                &[0.0, 0.3, 0.7][..],
+                &[0.5, 0.5, 0.0][..],
+                &ground3[..],
+                3usize,
+            ),
+            (&[0.2, 0.8][..], &[0.2, 0.8][..], &ground2[..], 2usize),
+        ];
+        for (left, right, ground, dimension) in cases {
+            let reference = try_emd_pre_scratch_reference(left, right, ground, dimension);
+            let actual = try_emd_with_scratch(left, right, ground, dimension, &mut scratch);
+            let wrapper = try_emd(left, right, ground, dimension);
+            let expected_bits = reference.unwrap().to_bits();
+            assert_eq!(actual.unwrap().to_bits(), expected_bits);
+            assert_eq!(wrapper.unwrap().to_bits(), expected_bits);
+        }
+
+        let expected_error = try_emd_pre_scratch_reference(&[-1.0, 2.0], &[0.5, 0.5], &ground2, 2)
+            .expect_err("negative mass must fail in reference");
+        let actual_error =
+            try_emd_with_scratch(&[-1.0, 2.0], &[0.5, 0.5], &ground2, 2, &mut scratch)
+                .expect_err("negative mass must fail with reused scratch");
+        assert_eq!(actual_error, expected_error);
+
+        let expected_context = emd_with_context(
+            "scratch-error-context",
+            3,
+            5,
+            &[0.5, 0.5],
+            &[0.5, 0.5],
+            &[0.0, f32::NAN, 1.0, 0.0],
+            2,
+        )
+        .expect_err("reference context must fail");
+        let actual_context = emd_with_context_with_scratch(
+            "scratch-error-context",
+            3,
+            5,
+            &[0.5, 0.5],
+            &[0.5, 0.5],
+            &[0.0, f32::NAN, 1.0, 0.0],
+            2,
+            &mut scratch,
+        )
+        .expect_err("scratch context must fail");
+        assert_eq!(actual_context.phase, expected_context.phase);
+        assert_eq!(actual_context.point_index, expected_context.point_index);
+        assert_eq!(
+            actual_context.centroid_index,
+            expected_context.centroid_index
+        );
+        assert_eq!(actual_context.left, expected_context.left);
+        assert_eq!(actual_context.right, expected_context.right);
+        assert_eq!(actual_context.source, expected_context.source);
+        assert_eq!(actual_context.ground.len(), expected_context.ground.len());
+        for (actual, expected) in actual_context.ground.iter().zip(&expected_context.ground) {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+
+        let reference = try_emd_pre_scratch_reference(&[0.9, 0.1], &[0.4, 0.6], &ground2, 2);
+        let actual = try_emd_with_scratch(&[0.9, 0.1], &[0.4, 0.6], &ground2, 2, &mut scratch);
+        assert_eq!(actual.unwrap().to_bits(), reference.unwrap().to_bits());
+    }
+
+    #[test]
+    #[ignore = "ручной release microbenchmark EmdScratch; не запускает генератор"]
+    fn test_only_emd_scratch_microbenchmark() {
+        use std::hint::black_box;
+
+        const DIMENSION: usize = 20;
+        const WARMUP_CALLS: usize = 128;
+        const CALLS_PER_SAMPLE: usize = 5_000;
+        const SAMPLES: usize = 3;
+        let timeout = Duration::from_secs(20);
+        let left: Vec<f32> = (0..DIMENSION)
+            .map(|index| ((index * 7 % 19) + 1) as f32)
+            .collect();
+        let right: Vec<f32> = (0..DIMENSION)
+            .map(|index| ((index * 11 % 17) + 1) as f32)
+            .collect();
+        let ground: Vec<f32> = (0..DIMENSION)
+            .flat_map(|left| (0..DIMENSION).map(move |right| left.abs_diff(right) as f32))
+            .collect();
+        let deadline = Instant::now() + timeout;
+        let mut scratch = EmdScratch::default();
+        for _ in 0..WARMUP_CALLS {
+            let reference = try_emd_pre_scratch_reference(&left, &right, &ground, DIMENSION)
+                .expect("reference warmup");
+            let actual = try_emd_with_scratch(&left, &right, &ground, DIMENSION, &mut scratch)
+                .expect("scratch warmup");
+            assert_eq!(actual.to_bits(), reference.to_bits());
+        }
+
+        let mut reference_elapsed = Duration::ZERO;
+        let mut scratch_elapsed = Duration::ZERO;
+        let mut reference_calls = 0usize;
+        let mut scratch_calls = 0usize;
+        'samples: for _ in 0..SAMPLES {
+            let started = Instant::now();
+            for _ in 0..CALLS_PER_SAMPLE {
+                if Instant::now() >= deadline {
+                    break 'samples;
+                }
+                black_box(
+                    try_emd_pre_scratch_reference(
+                        black_box(&left),
+                        black_box(&right),
+                        black_box(&ground),
+                        DIMENSION,
+                    )
+                    .expect("reference benchmark"),
+                );
+                reference_calls += 1;
+            }
+            reference_elapsed += started.elapsed();
+
+            let started = Instant::now();
+            for _ in 0..CALLS_PER_SAMPLE {
+                if Instant::now() >= deadline {
+                    break 'samples;
+                }
+                black_box(
+                    try_emd_with_scratch(
+                        black_box(&left),
+                        black_box(&right),
+                        black_box(&ground),
+                        DIMENSION,
+                        &mut scratch,
+                    )
+                    .expect("scratch benchmark"),
+                );
+                scratch_calls += 1;
+            }
+            scratch_elapsed += started.elapsed();
+        }
+        eprintln!(
+            "emd-scratch-microbenchmark dimension={DIMENSION} reference_calls={reference_calls} reference_seconds={:.9} reference_ns_per_call={:.3} scratch_calls={scratch_calls} scratch_seconds={:.9} scratch_ns_per_call={:.3} timeout_seconds={}",
+            reference_elapsed.as_secs_f64(),
+            reference_elapsed.as_nanos() as f64 / reference_calls.max(1) as f64,
+            scratch_elapsed.as_secs_f64(),
+            scratch_elapsed.as_nanos() as f64 / scratch_calls.max(1) as f64,
+            timeout.as_secs(),
+        );
+        assert!(
+            reference_calls > 0 && scratch_calls > 0,
+            "timeout before measurement"
+        );
     }
 
     #[test]

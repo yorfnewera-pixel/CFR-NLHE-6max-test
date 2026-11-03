@@ -379,6 +379,28 @@ tie, допуски, ошибки и обновление центров ост�
 Полная сводка:
 `web_reports/potential-emd-flop-hot-path-audit-20261103.md`.
 
+### EmdScratch: эквивалентность и microbenchmark
+
+Реализована минимальная оптимизация allocation hot path точного EMD. Публичный
+`try_emd()` сохранён; внутренний solver получает `EmdScratch`, который перед
+каждым вызовом полностью сбрасывает логическое состояние и переиспользует лишь
+capacity временных буферов. В k-means scratch локален Rayon-задаче в параллельных
+фазах и локален последовательной фазе objective. Общего mutable state,
+блокировок и кэша расстояний нет.
+
+Дорефакторинговый solver из commit `bbca55febbcf63c483ac829b8241685b751a3779`
+остался только под `cfg(test)` как независимый эталон. Новый test подтверждает
+побитовое совпадение reference, reusable scratch и публичного wrapper на разных
+размерностях, sparse/dense входах и после ошибки; полная Rust-проверка: 64
+passed, 0 failed, 8 ignored.
+
+Ограниченный release microbenchmark без генератора выполнил по 15 000 вызовов
+на фиксированных `dim=20` входах: reference `171 201,333 ns/call`, scratch
+`161 772,660 ns/call` (около 5,5 % на transport-kernel). Этот результат не
+экстраполируется на flop clustering или генератор. Production-контроль не
+запускался. Полная сводка:
+`web_reports/potential-emd-scratch-20261103.md`.
+
 ### Отдельный production-бюджет flop
 
 Добавлен opt-in `--flop-iterations N` и параметр launcher
