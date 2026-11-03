@@ -401,6 +401,27 @@ passed, 0 failed, 8 ignored.
 запускался. Полная сводка:
 `web_reports/potential-emd-scratch-20261103.md`.
 
+### Production-контроль EmdScratch: ranks=6, K=20, turn=50, flop=30
+
+До измерения добавлена test-only интеграционная сверка production scratch-пути
+с прежним `try_emd_pre_scratch_reference` внутри одного clustering-кода: на
+малом fixture побитово совпали assignment, центры, objective, diagnostics и
+final diagnostic при 1 и 2 Rayon-потоках. Vec-reference сам по себе не был
+независимым oracle, потому что уже использовал новый solver.
+
+Ровно один launcher-контроль с общим budget `10`, turn `50`, flop `30`, двумя
+потоками, seed `202610050003`, timeout `600 с`, финальной диагностикой и
+flop-профилем завершился с exit code `0` и status `complete`. SHA до сборки,
+перед запуском и в `summary.code_revision` равны
+`3e40c4a9f69005a098c9e1df7180a901a0373d6b`; дерево было чистым.
+
+Все три SHA-256, полные river/turn/flop objective-массивы, итерации
+`10/21/24` и финальные диагностические значения точно совпали с
+provenance-repro. Время генератора составило `312,9 с` против `392,9 с`, но
+один новый прогон не является заявлением устойчивого ускорения. Failure-dump
+и оставшиеся процессы отсутствуют. Полная сводка:
+`web_reports/potential-emd-r6-k20-turn50-flop30-scratch-control-20261103.md`.
+
 ### Отдельный production-бюджет flop
 
 Добавлен opt-in `--flop-iterations N` и параметр launcher
