@@ -1,10 +1,15 @@
-# Test-only continuation R7/K10 из checkpoint-28 — остановлен на gate
+# Test-only continuation R7/K10 из checkpoint-28 — стабилизация на шаге 29
 
-Дата: 2026-11-03. Это ровно одна разрешённая вычислительная попытка
-continuation из сохранённого checkpoint-28; replay шагов 1–28, flop и
-production-таблицы не запускались.
+Дата: 2026-11-03. Итоговый continuation-run достиг численной согласованности
+назначений на шаге 29: final changed fraction равна IEEE-754 signed zero,
+состояние точно повторилось на переходе `29→30` и оставалось неизменным до
+границы 50. Это подтверждает преждевременность старой пороговой остановки
+turn для данного контроля; replay шагов 1–28, flop и production-таблицы не
+запускались.
 
-## Подготовка
+## История первой остановленной попытки
+
+### Подготовка
 
 Test-only commit: `3a0410243b33c9425fb932a8fb8c0e7a53a12d88`; дерево перед actual
 run было чистым. Добавлены только ignored continuation-test, его PowerShell
@@ -25,7 +30,7 @@ tests::test_only_ranks7_turn_k10_continues_after_verified_step_28_only: test
 До Cargo run runner проверил существующий checkpoint SHA-256:
 `94251D3D492741A62D1E38216F4C472597BAF6A4F12FDE71FB203C9AB3B213FC`.
 
-## Единственный actual run
+### Единственный actual run
 
 ```powershell
 pwsh -NoProfile -File .\native\hu20-buckets\scripts\run-r7-turn-continuation-probe.ps1 -OutputDirectory .\native\hu20-buckets\results\test-only-r7-turn-k10-checkpoint28-continuation-20261103 -CheckpointPath .\native\hu20-buckets\results\test-only-r7-turn-k10-replay-only-execution-20261103\checkpoints\checkpoint-28.bin -TimeoutSeconds 300

@@ -1249,6 +1249,17 @@ pub struct Clustering {
     /// Заполняется только по явному запросу, потому что требует ещё одного
     /// полного прохода assignment.
     pub final_assignment_diagnostic: Option<FinalAssignmentDiagnostic>,
+    /// Причина завершения 1D-кластеризации turn; для остальных путей отсутствует.
+    pub termination: Option<ClusteringTermination>,
+    /// Согласованы ли возвращённые назначения с финальными центрами 1D turn.
+    pub final_assignment_consistent: bool,
+}
+
+/// Причина завершения 1D-кластеризации turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClusteringTermination {
+    EarlyStopConsistent,
+    IterationBudgetExhausted,
 }
 
 /// Результат EMD-кластеризации с необязательными измерениями стоимости.
@@ -1275,9 +1286,14 @@ pub struct EmdClusteringProfile {
 }
 
 /// Результат проверки финальных назначений без изменения сохраняемых таблиц.
+#[derive(Clone, Copy)]
 pub struct FinalAssignmentDiagnostic {
     pub changed_weight_fraction: f64,
     pub objective: f64,
+}
+
+fn is_final_assignment_consistent(changed_weight_fraction: f64) -> bool {
+    changed_weight_fraction == 0.0
 }
 
 /// Состояние одной итерации EMD-кластеризации.
@@ -1485,6 +1501,8 @@ pub fn kmeans(
         objective,
         diagnostics: Vec::new(),
         final_assignment_diagnostic: None,
+        termination: None,
+        final_assignment_consistent: false,
     }
 }
 
@@ -1846,6 +1864,8 @@ fn kmeans_emd_profiled_with_assignment(
             objective,
             diagnostics,
             final_assignment_diagnostic,
+            termination: None,
+            final_assignment_consistent: false,
         },
         profile: clustering_started.map(|started| EmdClusteringProfile {
             wall_clock: started.elapsed(),
@@ -1971,7 +1991,11 @@ pub fn kmeans_wasserstein_1d_with_diagnostics(
     let mut assignment = vec![u16::MAX; n];
     let mut objective = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut gate_diagnostic = None;
+    let mut termination = None;
     for _ in 0..max_iterations {
+        // Предыдущая проверка относится к состоянию до следующего update.
+        gate_diagnostic = None;
         let assigned: Vec<(u16, f32)> = (0..n)
             .into_par_iter()
             .map(|index| {
@@ -2049,7 +2073,21 @@ pub fn kmeans_wasserstein_1d_with_diagnostics(
             occupied_buckets: mass.iter().filter(|&&value| value > 0.0).count(),
         });
         if moved / total < 1e-4 {
-            break;
+            let diagnostic = wasserstein_1d_final_assignment_diagnostic(
+                &sorted_points,
+                dimension,
+                weight,
+                &sorted_coordinates,
+                &centroids,
+                k,
+                &assignment,
+            );
+            if is_final_assignment_consistent(diagnostic.changed_weight_fraction) {
+                gate_diagnostic = Some(diagnostic);
+                termination = Some(ClusteringTermination::EarlyStopConsistent);
+                break;
+            }
+            gate_diagnostic = Some(diagnostic);
         }
     }
     let mut original_centroids = vec![0.0; k * dimension];
@@ -2059,53 +2097,78 @@ pub fn kmeans_wasserstein_1d_with_diagnostics(
                 centroids[cluster * dimension + sorted_index];
         }
     }
-    let final_assignment_diagnostic = if diagnose_final_assignment {
-        let reassigned: Vec<(u16, f32)> = (0..n)
-            .into_par_iter()
-            .map(|index| {
-                let point = row(index);
-                (0..k)
-                    .map(|cluster| {
-                        (
-                            cluster as u16,
-                            wasserstein_1d_sorted(
-                                point,
-                                &centroids[cluster * dimension..(cluster + 1) * dimension],
-                                &sorted_coordinates,
-                            ),
-                        )
-                    })
-                    .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
-                    .unwrap()
-            })
-            .collect();
-        let changed_weight_fraction = reassigned
-            .iter()
-            .zip(&assignment)
-            .zip(weight)
-            .filter(|((next, current), _)| next.0 != **current)
-            .map(|(_, &value)| value as f64)
-            .sum::<f64>()
-            / total;
-        let objective = reassigned
-            .iter()
-            .zip(weight)
-            .map(|(entry, &value)| entry.1 as f64 * value as f64)
-            .sum::<f64>()
-            / total;
-        Some(FinalAssignmentDiagnostic {
-            changed_weight_fraction,
-            objective,
-        })
-    } else {
-        None
-    };
+    let final_gate_diagnostic = gate_diagnostic.unwrap_or_else(|| {
+        wasserstein_1d_final_assignment_diagnostic(
+            &sorted_points,
+            dimension,
+            weight,
+            &sorted_coordinates,
+            &centroids,
+            k,
+            &assignment,
+        )
+    });
+    let final_assignment_consistent =
+        is_final_assignment_consistent(final_gate_diagnostic.changed_weight_fraction);
+    let termination = termination.unwrap_or(ClusteringTermination::IterationBudgetExhausted);
+    let final_assignment_diagnostic = diagnose_final_assignment.then_some(final_gate_diagnostic);
     Clustering {
         assignment,
         centroids: original_centroids,
         objective,
         diagnostics,
         final_assignment_diagnostic,
+        termination: Some(termination),
+        final_assignment_consistent,
+    }
+}
+
+fn wasserstein_1d_final_assignment_diagnostic(
+    sorted_points: &[f32],
+    dimension: usize,
+    weight: &[u64],
+    sorted_coordinates: &[f32],
+    centroids: &[f32],
+    k: usize,
+    assignment: &[u16],
+) -> FinalAssignmentDiagnostic {
+    let reassigned: Vec<(u16, f32)> = (0..weight.len())
+        .into_par_iter()
+        .map(|index| {
+            let point = &sorted_points[index * dimension..(index + 1) * dimension];
+            (0..k)
+                .map(|cluster| {
+                    (
+                        cluster as u16,
+                        wasserstein_1d_sorted(
+                            point,
+                            &centroids[cluster * dimension..(cluster + 1) * dimension],
+                            sorted_coordinates,
+                        ),
+                    )
+                })
+                .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
+                .unwrap()
+        })
+        .collect();
+    let total: f64 = weight.iter().map(|&value| value as f64).sum();
+    let changed_weight_fraction = reassigned
+        .iter()
+        .zip(assignment)
+        .zip(weight)
+        .filter(|((next, current), _)| next.0 != **current)
+        .map(|(_, &value)| value as f64)
+        .sum::<f64>()
+        / total;
+    let objective = reassigned
+        .iter()
+        .zip(weight)
+        .map(|(entry, &value)| entry.1 as f64 * value as f64)
+        .sum::<f64>()
+        / total;
+    FinalAssignmentDiagnostic {
+        changed_weight_fraction,
+        objective,
     }
 }
 
@@ -6725,6 +6788,85 @@ mod tests {
             .expect("requested diagnostic must be present");
         assert!(diagnostic.objective.is_finite());
         assert!((0.0..=1.0).contains(&diagnostic.changed_weight_fraction));
+    }
+
+    fn turn_termination_fixture() -> (Vec<f32>, Vec<u64>, Vec<f32>) {
+        (
+            vec![1.0, 0.0, 0.75, 0.25, 0.5, 0.5, 0.25, 0.75, 0.0, 1.0],
+            vec![10_000, 1, 1, 1, 1],
+            vec![0.0, 1.0],
+        )
+    }
+
+    #[test]
+    fn turn_termination_continues_after_nonzero_gate_reassignment() {
+        let (points, weight, coordinates) = turn_termination_fixture();
+
+        let result =
+            kmeans_wasserstein_1d_with_diagnostics(&points, &weight, &coordinates, 2, 5, 3, false);
+
+        assert_eq!(result.diagnostics.len(), 3);
+        assert!(matches!(
+            result.termination,
+            Some(ClusteringTermination::EarlyStopConsistent)
+        ));
+        assert!(result.final_assignment_consistent);
+        assert!(result.final_assignment_diagnostic.is_none());
+    }
+
+    #[test]
+    fn turn_termination_accepts_signed_zero_as_consistent() {
+        assert!(is_final_assignment_consistent(-0.0));
+    }
+
+    #[test]
+    fn turn_termination_reports_budget_exhaustion_without_extra_update() {
+        let (points, weight, coordinates) = turn_termination_fixture();
+
+        let result =
+            kmeans_wasserstein_1d_with_diagnostics(&points, &weight, &coordinates, 2, 5, 2, false);
+
+        assert_eq!(result.diagnostics.len(), 2);
+        assert!(matches!(
+            result.termination,
+            Some(ClusteringTermination::IterationBudgetExhausted)
+        ));
+        assert!(!result.final_assignment_consistent);
+        assert!(result.final_assignment_diagnostic.is_none());
+    }
+
+    #[test]
+    fn turn_termination_gate_does_not_mutate_state_or_require_optional_diagnostic() {
+        let (points, weight, coordinates) = turn_termination_fixture();
+        let without_output =
+            kmeans_wasserstein_1d_with_diagnostics(&points, &weight, &coordinates, 2, 5, 3, false);
+        let with_output =
+            kmeans_wasserstein_1d_with_diagnostics(&points, &weight, &coordinates, 2, 5, 3, true);
+
+        assert_eq!(without_output.assignment, with_output.assignment);
+        assert_eq!(without_output.centroids, with_output.centroids);
+        assert_eq!(without_output.objective, with_output.objective);
+        assert_eq!(
+            without_output
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.moved_weight_fraction.to_bits())
+                .collect::<Vec<_>>(),
+            with_output
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.moved_weight_fraction.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(without_output.termination, with_output.termination);
+        assert!(without_output.final_assignment_diagnostic.is_none());
+        assert_eq!(
+            with_output
+                .final_assignment_diagnostic
+                .expect("requested output diagnostic")
+                .changed_weight_fraction,
+            0.0
+        );
     }
 
     #[test]
