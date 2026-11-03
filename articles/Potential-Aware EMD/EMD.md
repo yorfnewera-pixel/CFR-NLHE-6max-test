@@ -665,3 +665,14 @@ Discovery runner исправлен и подтверждён без запус�
 discovery. River/turn и gates не стартовали, trace/checkpoint отсутствуют,
 повтор не выполнялся. Это третья инфраструктурная остановка, не численный
 результат replay; детали добавлены в тот же отчёт.
+
+### Exact selection verification R7/K10 без replay
+
+Runner теперь использует один полный `tests::...` libtest filter с
+`--release --lib` и для discovery, и для будущего run; `--ignored --exact`
+добавляются только как libtest flags. Малые проверки отклоняют короткий,
+несуществующий или множественный выбор. `-VerifyOnly` подтвердил ровно один
+test через exact `--list` при нулевых build/discovery exit codes и штатно
+остановился до replay. Новый вычислительный запуск не выполнялся и требует
+отдельного согласования. Детали:
+`web_reports/potential-emd-r7-k10-turn-replay-only-20261103.md`.

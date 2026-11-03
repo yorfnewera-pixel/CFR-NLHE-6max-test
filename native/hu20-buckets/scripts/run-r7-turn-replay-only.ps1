@@ -36,24 +36,25 @@ $context = Join-Path $output 'launcher-context.txt'
     "production_tables=false"
     "verify_only=$VerifyOnly"
     "manifest_path=$($cargoCommand.ManifestPath)"
-    "test=$($cargoCommand.TestName)"
-    "replay_arguments=$($cargoCommand.ReplayArguments)"
+    "test=$($cargoCommand.FullTestName)"
+    "selection_arguments=$(ConvertTo-CargoArgumentString $cargoCommand.SelectionArguments)"
+    "replay_arguments=$(ConvertTo-CargoArgumentString $cargoCommand.ReplayArguments)"
 ) | Set-Content -LiteralPath $context -Encoding utf8
 
 Push-Location $project
 try {
-    & cargo.exe test --manifest-path $cargoCommand.ManifestPath --release --no-run
+    & cargo.exe @($cargoCommand.BuildArguments)
     $buildExitCode = $LASTEXITCODE
     "release_build_exit_code=$buildExitCode" | Add-Content -LiteralPath $context -Encoding utf8
     if ($buildExitCode -ne 0) { throw "Release test build failed with code $buildExitCode." }
-    $discovery = & cargo.exe test --manifest-path $cargoCommand.ManifestPath --release $cargoCommand.TestName -- --list 2>&1
+    $discovery = & cargo.exe @($cargoCommand.DiscoveryArguments) 2>&1
     $discoveryExitCode = $LASTEXITCODE
     "discovery_exit_code=$discoveryExitCode" | Add-Content -LiteralPath $context -Encoding utf8
     $discoveryLines = @($discovery | ForEach-Object { $_.ToString() })
     $discoveryLines | Set-Content -LiteralPath (Join-Path $output 'test-discovery.log') -Encoding utf8
     if ($discoveryExitCode -ne 0) { throw "Replay test discovery failed with code $discoveryExitCode." }
-    if (-not (Test-R7TurnReplayDiscovery -CargoExitCode $discoveryExitCode -OutputLines $discoveryLines -TestName $cargoCommand.TestName)) {
-        throw "Replay test discovery did not find $($cargoCommand.TestName)."
+    if (-not (Test-R7TurnReplayDiscovery -CargoExitCode $discoveryExitCode -OutputLines $discoveryLines -FullTestName $cargoCommand.FullTestName)) {
+        throw "Replay test discovery did not select exactly $($cargoCommand.FullTestName)."
     }
     "discovery_found=true" | Add-Content -LiteralPath $context -Encoding utf8
     if ($VerifyOnly) {
@@ -68,7 +69,7 @@ try {
     $env:HU20_R7_TURN_PROBE_CHECKPOINT_DIR = $checkpoints
     try {
         $exitCode = Invoke-SupervisedProcess -FilePath 'cargo.exe' `
-            -Arguments $cargoCommand.ReplayArguments `
+            -Arguments (ConvertTo-CargoArgumentString $cargoCommand.ReplayArguments) `
             -TimeoutSeconds $TimeoutSeconds -ContextPath $context `
             -StdoutPath (Join-Path $output 'stdout.log') -StderrPath (Join-Path $output 'stderr.log') `
             -MemoryScriptPath (Join-Path $PSScriptRoot 'measure-process-memory.ps1') `

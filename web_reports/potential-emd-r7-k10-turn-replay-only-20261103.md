@@ -144,3 +144,42 @@ HEAD на момент попытки: `9d0dcc3a883a4562d0c2dca6749c051cd2ebc3ae
 probe не выполнялись. До нового решения runner должен хранить полное libtest
 имя и его малая проверка должна дополнительно доказывать, что exact command
 выбирает ровно один test, а не ноль.
+
+## Exact selection verification без replay
+
+Runner теперь хранит единое полное libtest-имя
+`tests::test_only_ranks7_turn_k10_replays_verified_step_28_only` и передаёт
+один selection array как discovery, так и будущему run. Он содержит:
+
+```text
+test --manifest-path C:\Users\Cassmall\Desktop\CFR-NLHE-6max-test\native\hu20-buckets\Cargo.toml --release --lib tests::test_only_ranks7_turn_k10_replays_verified_step_28_only
+```
+
+Replay добавляет к тому же selection array только libtest flags:
+
+```text
+--ignored --exact --nocapture
+```
+
+Малые PowerShell-проверки подтвердили: полное имя выбирает ровно один test;
+короткое, похожее или отсутствующее имя выбирает ноль и отклоняется; два
+совпадения также отклоняются. Дополнительно покрыты ненулевой Cargo exit code
+и CRLF/LF.
+
+Без вычислительной ветки runner выполнен с `-VerifyOnly`:
+
+```powershell
+pwsh -NoProfile -File .\native\hu20-buckets\scripts\run-r7-turn-replay-only.ps1 -OutputDirectory .\native\hu20-buckets\results\test-only-r7-turn-k10-replay-only-exact-verify-20261103 -TimeoutSeconds 300 -VerifyOnly
+```
+
+`release_build_exit_code=0`, `discovery_exit_code=0`,
+`discovery_found=true`, `verify_only_complete=true`. Вывод exact discovery:
+
+```text
+tests::test_only_ranks7_turn_k10_replays_verified_step_28_only: test
+
+1 test, 0 benchmarks
+```
+
+Replay не запускался; trace, checkpoint и SHA-256 отсутствуют, процессов
+`hu20-buckets` нет. Нужна новая отдельная авторизация вычислительной попытки.
