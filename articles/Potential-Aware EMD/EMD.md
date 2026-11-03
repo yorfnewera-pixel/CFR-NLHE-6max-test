@@ -709,3 +709,16 @@ weight fraction `0.000019111323459144`, тогда как сохранённое
 получены. Timeout не сработал, оставшихся процессов нет; повтор и
 альтернативный probe не выполнялись. Детали:
 `web_reports/potential-emd-r7-k10-turn-checkpoint28-continuation-20261103.md`.
+
+### Continuation R7/K10 checkpoint-28 до шага 50: стабилизация на 29
+
+После inspection preflight с побитовым baseline выполнен ровно один test-only
+continuation из проверенного checkpoint-28 на commit
+`52a426fc27e2fe3baec667340692fe238adcd64d`. Release build/discovery и actual
+run выбрали ровно один test; actual завершился с `exit_code=0` за `3.04 с`.
+На шаге 29 final changed weight fraction стал численно нулевым (signed zero
+в trace) и остался нулевым до шага 50. Полное состояние точно повторилось на
+шагах `29→30`; явная test-only граница 50 стала штатной причиной остановки.
+Созданы checkpoints 29–50, timeout не сработал, процессов не осталось.
+Replay 1–28, flop и production-таблицы не запускались. Детали:
+`web_reports/potential-emd-r7-k10-turn-checkpoint28-continuation-20261103.md`.

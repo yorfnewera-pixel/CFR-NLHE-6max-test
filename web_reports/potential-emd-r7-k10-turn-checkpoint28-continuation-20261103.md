@@ -53,3 +53,33 @@ right: 0.000019111323459150
 нет и вопрос о достижении фактического нуля остаётся неотвеченным. После
 остановки процессов `hu20-buckets` нет. Повтор, альтернативный probe и
 изменение gate автоматически не выполнялись.
+
+## Единственный continuation-run после побитового preflight
+
+Inspection preflight на commit `52a426fc27e2fe3baec667340692fe238adcd64d`
+зафиксировал serialised objective checkpoint-28 `0x3FB007C287E6DCF2` и
+заново вычисляемые final objective `0x3FB007BBAA348F28` / changed fraction
+`0x3EF40A2825D92ED3`. Final diagnostic не сериализована в checkpoint; она
+привязана к SHA входа, fingerprint восстановленных входов и этой версии
+диагностического кода. Preflight: `checkpoint_gate_passed=true`,
+`continuation_started=false`.
+
+Ровно один actual run в новом локальном каталоге
+`results/test-only-r7-turn-k10-checkpoint28-continuation-actual-20261103`
+прошёл с `exit_code=0`: выполнен один целевой test (`1 passed; 0 failed`) за
+`3.04 с`, timeout не сработал. До него SHA checkpoint совпал с
+`94251D3D492741A62D1E38216F4C472597BAF6A4F12FDE71FB203C9AB3B213FC`, а
+release build и discovery имели код `0` и выбрали ровно один continuation-test.
+
+| Шаги | Objective до / после update | Moved fraction | Занятые | Final objective / changed |
+| --- | --- | --- | ---: | --- |
+| 29 | `0.06261799722102224` / `0.06261780246870059` | `0.00001911132345915` | 10 | `0.06261780246870059` / `-0.0` |
+| 30–50 (каждый) | `0.06261780246870059` / `0.06261780246870059` | `-0.0` | 10 | `0.06261780246870059` / `-0.0` |
+
+Полный trace содержит отдельные строки для каждого шага 29–50. Final changed
+fraction стал численно нулевым на шаге 29 и сохранялся до шага 50 (trace
+показывает IEEE-754 signed zero `-0.0`). Полное algorithmic state точно
+повторилось на `29→30`; штатная причина остановки — test-only граница 50.
+Сохранены атомарные checkpoints 29–50. Максимумы 4 выборок памяти: private
+bytes `3,117,056`, working set `9,416,704`. Процессов `hu20-buckets` после
+run нет; следующих экспериментов не запускалось.
