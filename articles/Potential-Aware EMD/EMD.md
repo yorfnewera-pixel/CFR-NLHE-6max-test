@@ -855,3 +855,14 @@ SHA-256 river, turn и flop также совпали. Время и памят�
 измерение реального PID и не используются как критерий воспроизводимости.
 Детали:
 `web_reports/potential-emd-r7-k10-turn50-flop50-repro-20261103.md`.
+
+### Production-контроль R7/K10, второй seed
+
+Единственный production-контроль с seed `202610050004`, budgets `10/50/50`
+и двумя Rayon-потоками завершился с `exit_code=0` и `status=complete`.
+Вычислительный код относительно `d53e51a` не изменён. Turn остановился на
+38, flop — на 30 как `EarlyStopConsistent`; их final changed fraction
+численно нулевая, consistency истинная. Сохранены полные objective-массивы
+и новые SHA-256 baseline второго seed; рост objectives зафиксирован без
+вывода об ошибке решателя. Детали:
+`web_reports/potential-emd-r7-k10-turn50-flop50-seed-202610050004-20261104.md`.
