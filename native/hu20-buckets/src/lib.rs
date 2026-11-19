@@ -411,6 +411,81 @@ pub fn river_equities(board: &[u8], deck: &[u8]) -> Vec<([u8; 2], f32)> {
     out
 }
 
+/// OCHS-equity каждого holding на готовой доске против восьми групп рук
+/// соперника. Исключение карт hero точное; ничьи дают половину очка.
+pub fn river_ochs_equities(board: &[u8], deck: &[u8]) -> Vec<([u8; 2], [f32; OCHS_GROUP_COUNT])> {
+    let rest: Vec<u8> = deck
+        .iter()
+        .copied()
+        .filter(|card| !board.contains(card))
+        .collect();
+    let mut hands: Vec<([u8; 2], u32, usize)> = Vec::with_capacity(rest.len() * rest.len() / 2);
+    let mut totals = [0u32; OCHS_GROUP_COUNT];
+    let mut total_cards = [[0u32; 52]; OCHS_GROUP_COUNT];
+    let mut cards = [0u8; 7];
+    cards[2..].copy_from_slice(board);
+    for first in 0..rest.len() {
+        for second in first + 1..rest.len() {
+            let hole = [rest[first], rest[second]];
+            let group = ochs_group(hole) as usize;
+            cards[0] = hole[0];
+            cards[1] = hole[1];
+            hands.push((hole, evaluate(&cards), group));
+            totals[group] += 1;
+            total_cards[group][hole[0] as usize] += 1;
+            total_cards[group][hole[1] as usize] += 1;
+        }
+    }
+    hands.sort_unstable_by_key(|hand| hand.1);
+
+    let mut lower_totals = [0u32; OCHS_GROUP_COUNT];
+    let mut lower_cards = [[0u32; 52]; OCHS_GROUP_COUNT];
+    let mut out = Vec::with_capacity(hands.len());
+    let mut start = 0;
+    while start < hands.len() {
+        let mut end = start;
+        while end < hands.len() && hands[end].1 == hands[start].1 {
+            end += 1;
+        }
+        let mut tie_totals = [0u32; OCHS_GROUP_COUNT];
+        let mut tie_cards = [[0u32; 52]; OCHS_GROUP_COUNT];
+        for hand in &hands[start..end] {
+            tie_totals[hand.2] += 1;
+            tie_cards[hand.2][hand.0[0] as usize] += 1;
+            tie_cards[hand.2][hand.0[1] as usize] += 1;
+        }
+        for hand in &hands[start..end] {
+            let first = hand.0[0] as usize;
+            let second = hand.0[1] as usize;
+            let mut equities = [0.0f32; OCHS_GROUP_COUNT];
+            for group in 0..OCHS_GROUP_COUNT {
+                let owns_pair = u32::from(group == hand.2);
+                let wins =
+                    lower_totals[group] - lower_cards[group][first] - lower_cards[group][second];
+                let ties = tie_totals[group] + owns_pair
+                    - tie_cards[group][first]
+                    - tie_cards[group][second];
+                let eligible = totals[group] + owns_pair
+                    - total_cards[group][first]
+                    - total_cards[group][second];
+                assert!(
+                    eligible > 0,
+                    "пустая OCHS-группа требует отдельного правила"
+                );
+                equities[group] = (wins as f32 + 0.5 * ties as f32) / eligible as f32;
+            }
+            out.push((hand.0, equities));
+        }
+        for hand in &hands[start..end] {
+            lower_totals[hand.2] += 1;
+            lower_cards[hand.2][hand.0[0] as usize] += 1;
+            lower_cards[hand.2][hand.0[1] as usize] += 1;
+        }
+        start = end;
+    }
+    out
+}
+
 /// River classes, sorted by key, with equity and orbit weight.
 pub struct RiverTable {
     pub keys: Vec<u128>,
@@ -8009,6 +8084,71 @@ mod tests {
                             assert_eq!(ochs_group([map(first), map(second)]), original);
                         }
                     }
+                }
+            }
+        }
+    }
+
+    fn brute_force_ochs_equities(
+        board: &[u8],
+        deck: &[u8],
+        hole: [u8; 2],
+    ) -> [f32; OCHS_GROUP_COUNT] {
+        let mine = evaluate(&[
+            hole[0], hole[1], board[0], board[1], board[2], board[3], board[4],
+        ]);
+        let rest: Vec<u8> = deck
+            .iter()
+            .copied()
+            .filter(|card| !board.contains(card) && !hole.contains(card))
+            .collect();
+        let mut scores = [0.0f64; OCHS_GROUP_COUNT];
+        let mut eligible = [0u32; OCHS_GROUP_COUNT];
+        for opponent in combinations(&rest, 2) {
+            let group = ochs_group([opponent[0], opponent[1]]) as usize;
+            let theirs = evaluate(&[
+                opponent[0],
+                opponent[1],
+                board[0],
+                board[1],
+                board[2],
+                board[3],
+                board[4],
+            ]);
+            scores[group] += if mine > theirs {
+                1.0
+            } else if mine == theirs {
+                0.5
+            } else {
+                0.0
+            };
+            eligible[group] += 1;
+        }
+        std::array::from_fn(|group| {
+            assert!(eligible[group] > 0, "fixture has empty OCHS group {group}");
+            (scores[group] / eligible[group] as f64) as f32
+        })
+    }
+
+    #[test]
+    fn river_ochs_matches_brute_force() {
+        // Сбой, который ловит тест: пропуск card removal, неверный учёт ties
+        // или смешение OCHS-групп в оптимизированном расчёте.
+        let deck = deck(13);
+        for board in [
+            cards("Ah Kd 7c 7s 2h"),
+            cards("Ah Kh Qh Jh Th"),
+            cards("9h Th Jc Qd Ks"),
+        ] {
+            for (hole, actual) in river_ochs_equities(&board, &deck).iter().step_by(97) {
+                let expected = brute_force_ochs_equities(&board, &deck, *hole);
+                for group in 0..OCHS_GROUP_COUNT {
+                    assert!(
+                        (actual[group] - expected[group]).abs() < 1e-6,
+                        "board={board:?}, hole={hole:?}, group={group}, actual={}, expected={}",
+                        actual[group],
+                        expected[group]
+                    );
                 }
             }
         }
