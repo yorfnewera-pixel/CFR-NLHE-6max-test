@@ -458,6 +458,10 @@ pub fn river_ochs_equities(board: &[u8], deck: &[u8]) -> Vec<([u8; 2], [f32; OCH
             let first = hand.0[0] as usize;
             let second = hand.0[1] as usize;
             let mut equities = [0.0f32; OCHS_GROUP_COUNT];
+            let mut empty_groups = [false; OCHS_GROUP_COUNT];
+            let mut uniform_wins = 0u32;
+            let mut uniform_ties = 0u32;
+            let mut uniform_eligible = 0u32;
             for group in 0..OCHS_GROUP_COUNT {
                 let owns_pair = u32::from(group == hand.2);
                 let wins =
@@ -468,11 +472,21 @@ pub fn river_ochs_equities(board: &[u8], deck: &[u8]) -> Vec<([u8; 2], [f32; OCH
                 let eligible = totals[group] + owns_pair
                     - total_cards[group][first]
                     - total_cards[group][second];
-                assert!(
-                    eligible > 0,
-                    "пустая OCHS-группа требует отдельного правила"
-                );
-                equities[group] = (wins as f32 + 0.5 * ties as f32) / eligible as f32;
+                uniform_wins += wins;
+                uniform_ties += ties;
+                uniform_eligible += eligible;
+                if eligible == 0 {
+                    empty_groups[group] = true;
+                } else {
+                    equities[group] = (wins as f32 + 0.5 * ties as f32) / eligible as f32;
+                }
+            }
+            let uniform_equity =
+                (uniform_wins as f32 + 0.5 * uniform_ties as f32) / uniform_eligible as f32;
+            for group in 0..OCHS_GROUP_COUNT {
+                if empty_groups[group] {
+                    equities[group] = uniform_equity;
+                }
             }
             out.push((hand.0, equities));
         }
@@ -8152,5 +8166,158 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn ochs_empty_group_uses_uniform_equity() {
+        // Сбой, который ловит тест: пустая группа превращается в 0, NaN или
+        // panic вместо scalar uniform equity той же hero-руки.
+        let deck = deck(5);
+        let board = cards("Tc Jd Qh Ks Ac");
+        let hole = [parse_card("Th"), parse_card("Jc")];
+        let scalar = river_equities(&board, &deck)
+            .into_iter()
+            .find(|(candidate, _)| *candidate == hole)
+            .unwrap()
+            .1;
+        let ochs = river_ochs_equities(&board, &deck)
+            .into_iter()
+            .find(|(candidate, _)| *candidate == hole)
+            .unwrap()
+            .1;
+        assert_eq!(ochs[0].to_bits(), scalar.to_bits());
+    }
+
+    #[test]
+    fn ochs_respects_suit_symmetry() {
+        // Сбой, который ловит тест: компонента OCHS зависит от имён мастей,
+        // а не только от их отношений в hero-руке и на доске.
+        let deck = deck(13);
+        let board = cards("Ah Kd 7c 7s 2h");
+        let hole = [parse_card("Jc"), parse_card("Qc")];
+        let permutation = [1u8, 3, 0, 2];
+        let map = |card: u8| card / 4 * 4 + permutation[(card % 4) as usize];
+        let permuted_board: Vec<u8> = board.iter().copied().map(map).collect();
+        let mut permuted_hole = [map(hole[0]), map(hole[1])];
+        permuted_hole.sort_unstable();
+        let original = river_ochs_equities(&board, &deck)
+            .into_iter()
+            .find(|(candidate, _)| *candidate == hole)
+            .unwrap()
+            .1;
+        let permuted = river_ochs_equities(&permuted_board, &deck)
+            .into_iter()
+            .find(|(candidate, _)| *candidate == permuted_hole)
+            .unwrap()
+            .1;
+        for group in 0..OCHS_GROUP_COUNT {
+            assert!((original[group] - permuted[group]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn ochs_empty_group_small_deck_qualification() {
+        let deck = deck(5);
+        let mut classes =
+            std::collections::BTreeMap::<u128, (u64, [bool; OCHS_GROUP_COUNT])>::new();
+        for board in canonical_boards(&deck, 5) {
+            for (hole, equities) in river_ochs_equities(&board, &deck) {
+                assert!(equities.iter().all(|equity| (0.0..=1.0).contains(equity)));
+                let remaining: Vec<u8> = deck
+                    .iter()
+                    .copied()
+                    .filter(|card| !board.contains(card) && !hole.contains(card))
+                    .collect();
+                let mut eligible = [0u32; OCHS_GROUP_COUNT];
+                for opponent in combinations(&remaining, 2) {
+                    eligible[ochs_group([opponent[0], opponent[1]]) as usize] += 1;
+                }
+                let empty = std::array::from_fn(|group| eligible[group] == 0);
+                let key = class_key(&hole, &board);
+                let weight = orbit_size(&hole, &board);
+                match classes.get(&key) {
+                    Some((known_weight, known_empty)) => {
+                        assert_eq!(*known_weight, weight);
+                        assert_eq!(*known_empty, empty);
+                    }
+                    None => {
+                        classes.insert(key, (weight, empty));
+                    }
+                }
+            }
+        }
+        let total_weight: u64 = classes.values().map(|(weight, _)| *weight).sum();
+        let any_empty_weight: u64 = classes
+            .values()
+            .filter(|(_, empty)| empty.iter().any(|value| *value))
+            .map(|(weight, _)| *weight)
+            .sum();
+        for group in 0..OCHS_GROUP_COUNT {
+            let empty_weight: u64 = classes
+                .values()
+                .filter(|(_, empty)| empty[group])
+                .map(|(weight, _)| *weight)
+                .sum();
+            println!(
+                "OCHS empty-group qualification: group={group}, empty_weight={empty_weight}, total_weight={total_weight}, fraction={}",
+                empty_weight as f64 / total_weight as f64
+            );
+        }
+        println!(
+            "OCHS empty-group qualification: any_empty_weight={any_empty_weight}, total_weight={total_weight}, fraction={}",
+            any_empty_weight as f64 / total_weight as f64
+        );
+        assert!(any_empty_weight > 0);
+    }
+
+    #[test]
+    fn ochs_empty_group_full_deck_texture_qualification() {
+        let deck = deck(13);
+        let boards = [
+            cards("Ah Kd 7c 7s 2h"),
+            cards("Ah Kh Qh Jh Th"),
+            cards("9h Th Jc Qd Ks"),
+            cards("Ah Ad As Ac 2h"),
+        ];
+        let mut total_weight = 0u64;
+        let mut any_empty_weight = 0u64;
+        let mut empty_weight = [0u64; OCHS_GROUP_COUNT];
+        for board in boards {
+            for (hole, equities) in river_ochs_equities(&board, &deck) {
+                assert!(equities.iter().all(|equity| (0.0..=1.0).contains(equity)));
+                let remaining: Vec<u8> = deck
+                    .iter()
+                    .copied()
+                    .filter(|card| !board.contains(card) && !hole.contains(card))
+                    .collect();
+                let mut eligible = [0u32; OCHS_GROUP_COUNT];
+                for opponent in combinations(&remaining, 2) {
+                    eligible[ochs_group([opponent[0], opponent[1]]) as usize] += 1;
+                }
+                let weight = orbit_size(&hole, &board);
+                total_weight += weight;
+                let mut has_empty_group = false;
+                for group in 0..OCHS_GROUP_COUNT {
+                    if eligible[group] == 0 {
+                        empty_weight[group] += weight;
+                        has_empty_group = true;
+                    }
+                }
+                if has_empty_group {
+                    any_empty_weight += weight;
+                }
+            }
+        }
+        for group in 0..OCHS_GROUP_COUNT {
+            println!(
+                "OCHS full-deck texture qualification: group={group}, empty_weight={}, total_weight={total_weight}, fraction={}",
+                empty_weight[group],
+                empty_weight[group] as f64 / total_weight as f64
+            );
+        }
+        println!(
+            "OCHS full-deck texture qualification: any_empty_weight={any_empty_weight}, total_weight={total_weight}, fraction={}",
+            any_empty_weight as f64 / total_weight as f64
+        );
     }
 }
