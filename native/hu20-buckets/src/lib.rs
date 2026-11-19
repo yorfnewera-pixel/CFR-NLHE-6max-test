@@ -8000,7 +8000,9 @@ mod tests {
                                 continue;
                             }
                             let d = (0..4u8)
-                                .find(|candidate| *candidate != a && *candidate != b && *candidate != c)
+                                .find(|candidate| {
+                                    *candidate != a && *candidate != b && *candidate != c
+                                })
                                 .unwrap();
                             let permutation = [a, b, c, d];
                             let map = |card: u8| card / 4 * 4 + permutation[(card % 4) as usize];
