@@ -12,6 +12,42 @@ use std::time::{Duration, Instant};
 
 pub const RANKS: &[u8] = b"23456789TJQKA";
 pub const SUITS: &[u8] = b"cdhs";
+pub const OCHS_GROUP_COUNT: usize = 8;
+
+/// OCHS-группы стартовых рук из Table 1 Johanson et al. (AAMAS 2013).
+/// Строки и столбцы упорядочены по рангам от 2 до A; значения 0..7.
+const OCHS_GROUPS: [[u8; 13]; 13] = [
+    [3, 0, 0, 0, 0, 0, 1, 1, 1, 3, 3, 3, 5],
+    [0, 5, 0, 0, 0, 0, 1, 1, 2, 3, 3, 5, 5],
+    [0, 0, 5, 0, 0, 1, 1, 1, 2, 3, 3, 5, 5],
+    [0, 0, 0, 5, 2, 2, 2, 2, 2, 3, 3, 5, 5],
+    [0, 0, 0, 0, 6, 2, 2, 2, 2, 3, 4, 5, 5],
+    [0, 0, 0, 1, 2, 6, 2, 2, 4, 4, 4, 5, 6],
+    [0, 0, 1, 1, 2, 2, 7, 2, 4, 4, 4, 5, 6],
+    [1, 1, 1, 1, 2, 2, 2, 7, 4, 4, 4, 6, 6],
+    [1, 1, 1, 1, 2, 2, 2, 4, 7, 4, 6, 6, 6],
+    [1, 1, 3, 3, 3, 3, 4, 4, 4, 7, 6, 6, 6],
+    [3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 7, 6, 6],
+    [3, 3, 3, 5, 5, 5, 5, 5, 6, 6, 6, 7, 6],
+    [5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7],
+];
+
+/// Возвращает OCHS-группу физической стартовой руки в диапазоне 0..7.
+pub fn ochs_group(hand: [u8; 2]) -> u8 {
+    assert_ne!(hand[0], hand[1], "OCHS требует две разные карты");
+    let first_rank = (hand[0] / 4) as usize;
+    let second_rank = (hand[1] / 4) as usize;
+    let (low_rank, high_rank) = if first_rank <= second_rank {
+        (first_rank, second_rank)
+    } else {
+        (second_rank, first_rank)
+    };
+    if low_rank == high_rank || hand[0] % 4 == hand[1] % 4 {
+        OCHS_GROUPS[low_rank][high_rank]
+    } else {
+        OCHS_GROUPS[high_rank][low_rank]
+    }
+}
 
 pub fn parse_card(text: &str) -> u8 {
     let bytes = text.as_bytes();
@@ -7898,6 +7934,81 @@ mod tests {
                 (actual - expected).abs() < 5e-6,
                 "actual={actual}, expected={expected}"
             );
+        }
+    }
+
+    #[test]
+    fn ochs_group_matches_published_table() {
+        // Сбой, который ловит тест: неверная ориентация suited/offsuit треугольников
+        // или сдвиг опубликованной нумерации кластеров на единицу.
+        let expected = [
+            [3, 0, 0, 0, 0, 0, 1, 1, 1, 3, 3, 3, 5],
+            [0, 5, 0, 0, 0, 0, 1, 1, 2, 3, 3, 5, 5],
+            [0, 0, 5, 0, 0, 1, 1, 1, 2, 3, 3, 5, 5],
+            [0, 0, 0, 5, 2, 2, 2, 2, 2, 3, 3, 5, 5],
+            [0, 0, 0, 0, 6, 2, 2, 2, 2, 3, 4, 5, 5],
+            [0, 0, 0, 1, 2, 6, 2, 2, 4, 4, 4, 5, 6],
+            [0, 0, 1, 1, 2, 2, 7, 2, 4, 4, 4, 5, 6],
+            [1, 1, 1, 1, 2, 2, 2, 7, 4, 4, 4, 6, 6],
+            [1, 1, 1, 1, 2, 2, 2, 4, 7, 4, 6, 6, 6],
+            [1, 1, 3, 3, 3, 3, 4, 4, 4, 7, 6, 6, 6],
+            [3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 7, 6, 6],
+            [3, 3, 3, 5, 5, 5, 5, 5, 6, 6, 6, 7, 6],
+            [5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 7],
+        ];
+
+        let mut observed = [false; OCHS_GROUP_COUNT];
+        for high in 0..13u8 {
+            for low in 0..=high {
+                let pair = if low == high {
+                    [high * 4, high * 4 + 1]
+                } else {
+                    [low * 4, high * 4]
+                };
+                let suited = ochs_group(pair);
+                assert_eq!(suited, expected[low as usize][high as usize]);
+                observed[suited as usize] = true;
+
+                if low != high {
+                    let offsuit = ochs_group([low * 4, high * 4 + 1]);
+                    assert_eq!(offsuit, expected[high as usize][low as usize]);
+                    observed[offsuit as usize] = true;
+                }
+            }
+        }
+        assert!(observed.into_iter().all(|seen| seen));
+        assert_eq!(ochs_group(cards("2c 2d").try_into().unwrap()), 3);
+        assert_eq!(ochs_group(cards("Ac Ad").try_into().unwrap()), 7);
+        assert_eq!(ochs_group(cards("5c 6c").try_into().unwrap()), 2);
+        assert_eq!(ochs_group(cards("5c 6d").try_into().unwrap()), 0);
+    }
+
+    #[test]
+    fn ochs_group_respects_global_suit_permutation() {
+        // Сбой, который ловит тест: классификация зависит от конкретной масти,
+        // а не только от pair/suited/offsuit и рангов.
+        for first in 0..52u8 {
+            for second in first + 1..52u8 {
+                let original = ochs_group([first, second]);
+                for a in 0..4u8 {
+                    for b in 0..4u8 {
+                        if b == a {
+                            continue;
+                        }
+                        for c in 0..4u8 {
+                            if c == a || c == b {
+                                continue;
+                            }
+                            let d = (0..4u8)
+                                .find(|candidate| *candidate != a && *candidate != b && *candidate != c)
+                                .unwrap();
+                            let permutation = [a, b, c, d];
+                            let map = |card: u8| card / 4 * 4 + permutation[(card % 4) as usize];
+                            assert_eq!(ochs_group([map(first), map(second)]), original);
+                        }
+                    }
+                }
+            }
         }
     }
 }
