@@ -8154,7 +8154,9 @@ mod tests {
             cards("Ah Kh Qh Jh Th"),
             cards("9h Th Jc Qd Ks"),
         ] {
-            for (hole, actual) in river_ochs_equities(&board, &deck).iter().step_by(97) {
+            let actual_equities = river_ochs_equities(&board, &deck);
+            let mut checked = 0;
+            for (hole, actual) in &actual_equities {
                 let expected = brute_force_ochs_equities(&board, &deck, *hole);
                 for group in 0..OCHS_GROUP_COUNT {
                     assert!(
@@ -8164,7 +8166,9 @@ mod tests {
                         expected[group]
                     );
                 }
+                checked += 1;
             }
+            assert_eq!(checked, actual_equities.len());
         }
     }
 
