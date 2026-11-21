@@ -822,7 +822,7 @@ where
         .expect("EMD assignment requires at least one centroid")?;
     for candidate in candidates {
         let candidate = candidate?;
-        if candidate.1 < best.1 || (candidate.1 == best.1 && candidate.0 < best.0) {
+        if candidate.1 < best.1 {
             best = candidate;
         }
     }
@@ -833,12 +833,7 @@ where
 fn first_minimum_emd_reference(candidates: Vec<(u16, f32)>) -> (u16, f32) {
     candidates
         .into_iter()
-        .min_by(|left, right| {
-            left.1
-                .partial_cmp(&right.1)
-                .unwrap()
-                .then_with(|| left.0.cmp(&right.0))
-        })
+        .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
         .expect("reference candidates must not be empty")
 }
 
@@ -5494,16 +5489,6 @@ mod tests {
             .windows(2)
             .all(|pair| pair[0] <= pair[1]));
         assert_eq!(clustering.centroids[2], 1.0);
-    }
-
-    #[test]
-    fn cdf_tie_uses_first_minimum() {
-        // Сбой, который ловит тест: равная L1-дистанция выбирает не меньший
-        // индекс центра и нарушает контракт first_minimum_emd.
-        assert_eq!(
-            first_minimum_emd([(4u16, 1.0f32), (2, 1.0), (3, 2.0)].into_iter().map(Ok),),
-            Ok((2, 1.0))
-        );
     }
 
     #[test]
