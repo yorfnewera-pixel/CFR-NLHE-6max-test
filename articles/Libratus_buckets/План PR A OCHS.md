@@ -13,6 +13,8 @@
 ## Global Constraints
 
 - Только `native/hu20-buckets`; не менять Python, trainer, CFR, checkpoint и форматы K50.
+- Каждый запуск обязан выводить `running N tests`, где `N > 0`; число ignored
+  тестов указывается в отчёте.
 - Источник карты: Johanson et al., AAMAS 2013, Table 1; опубликованные номера `1..8` преобразуются во внутренние `0..7`.
 - Контекст класса — `hole + current board`; порядок улиц не добавляется.
 - Пустая группа заполняется scalar uniform equity: `uniform-equity-fill-v1`.
@@ -43,7 +45,7 @@
 
 - [ ] **Step 2: Запустить тесты карты и подтвердить падение**
 
-Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_group -- --exact`
+Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_group`
 
 Expected: FAIL, поскольку `ochs_group` и `OCHS_GROUP_COUNT` отсутствуют.
 
@@ -53,7 +55,7 @@ Expected: FAIL, поскольку `ochs_group` и `OCHS_GROUP_COUNT` отсут
 
 - [ ] **Step 4: Запустить целевые тесты**
 
-Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_group -- --exact`
+Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_group`
 
 Expected: PASS.
 
@@ -79,7 +81,7 @@ git commit -m "feat: add published OCHS hand groups"
 
 - [ ] **Step 2: Запустить oracle-тест и подтвердить падение**
 
-Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml river_ochs_matches_brute_force -- --exact`
+Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml river_ochs_matches_brute_force`
 
 Expected: FAIL, поскольку `river_ochs_equities` отсутствует.
 
@@ -89,7 +91,7 @@ Expected: FAIL, поскольку `river_ochs_equities` отсутствует.
 
 - [ ] **Step 4: Запустить oracle и регрессию scalar equity**
 
-Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml river_ochs_matches_brute_force -- --exact; cargo test --manifest-path native/hu20-buckets/Cargo.toml river_equity_matches_brute_force -- --exact`
+Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml river_ochs_matches_brute_force; cargo test --manifest-path native/hu20-buckets/Cargo.toml river_equity_matches_brute_force`
 
 Expected: PASS; существующий scalar-тест остаётся без изменений.
 
@@ -101,6 +103,9 @@ git commit -m "feat: calculate river OCHS equities"
 ```
 
 ### Task 3: Правило пустой группы, изоморфизм и ворота измерения
+
+> Ворота пустых групп закрыты точным сертификатом полной колоды. Step 4
+> проверяет только fallback `uniform-equity-fill-v1` на малой колоде.
 
 **Files:**
 - Modify: `native/hu20-buckets/src/lib.rs`
@@ -115,7 +120,7 @@ git commit -m "feat: calculate river OCHS equities"
 
 - [ ] **Step 2: Запустить тесты и подтвердить падение**
 
-Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_empty_group -- --exact; cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_respects_suit_symmetry -- --exact`
+Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_empty_group; cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_respects_suit_symmetry`
 
 Expected: FAIL до добавления правила fill и диагностического пути.
 
