@@ -5492,6 +5492,31 @@ mod tests {
     }
 
     #[test]
+    fn cdf_median_returns_assignments_for_final_centroids() {
+        // Сбой, который ловит тест: builder назначит bucket ID по финальным
+        // центрам, но clustering вернёт ID до их последнего обновления.
+        let points = [0.0, 0.2, 1.0, 0.0, 0.8, 1.0, 0.0, 1.0, 1.0];
+        let clustering = kmeans_cdf(
+            &points,
+            3,
+            &[1, 3, 1],
+            2,
+            11,
+            3,
+            CdfCentroidMode::LowerWeightedMedian,
+        );
+
+        assert!(clustering.final_assignment_consistent);
+        for (point, &bucket) in points.chunks_exact(3).zip(&clustering.assignment) {
+            let assigned = l1(point, &clustering.centroids[bucket as usize * 3..][..3]);
+            let best = (0..2)
+                .map(|center| l1(point, &clustering.centroids[center * 3..][..3]))
+                .fold(f32::INFINITY, f32::min);
+            assert_eq!(assigned, best);
+        }
+    }
+
+    #[test]
     fn emd_uses_ground_distance_for_mass_transfer() {
         let ground = vec![0.0, 2.0, 2.0, 0.0];
         assert!((emd(&[1.0, 0.0], &[0.0, 1.0], &ground, 2) - 2.0).abs() < 1e-6);
