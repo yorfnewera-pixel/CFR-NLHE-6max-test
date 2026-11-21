@@ -33,21 +33,21 @@
 - Consumes: `deck(13)`, `combinations`, `ochs_group`, `OCHS_GROUP_COUNT`.
 - Produces: unit-тест `ochs_full_deck_groups_require_at_least_eight_removed_cards`.
 
-- [ ] **Step 1: Написать падающий тест сертификата**
+- [x] **Step 1: Написать падающий тест сертификата**
 
 Для всех физических рук полной колоды сгруппировать пары по `ochs_group`; жадно выбрать восемь рук без общих карт в каждой группе и проверить точную принадлежность и непересечение.
 
-- [ ] **Step 2: Запустить RED**
+- [x] **Step 2: Запустить RED**
 
 Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_full_deck_groups_require_at_least_eight_removed_cards`
 
 Expected: FAIL, пока сертификат не реализован.
 
-- [ ] **Step 3: Реализовать test-only построение сертификата**
+- [x] **Step 3: Реализовать test-only построение сертификата**
 
 Использовать только физические пары и 52-битовую маску занятых карт; запретить любое обращение к `evaluate` или `river_ochs_equities`.
 
-- [ ] **Step 4: Запустить GREEN и полный crate suite**
+- [x] **Step 4: Запустить GREEN и полный crate suite**
 
 Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_full_deck_groups_require_at_least_eight_removed_cards; cargo test --manifest-path native/hu20-buckets/Cargo.toml`
 
@@ -59,15 +59,15 @@ Expected: PASS; тест печатает сертификаты и доказы
 - Modify: `articles/Libratus_buckets/EMD.md`.
 - Modify: `web_reports/libratus-ochs-pr-a-20261119.md`.
 
-- [ ] **Step 1: Записать математическое обоснование**
+- [x] **Step 1: Записать математическое обоснование**
 
 Заменить блокировку из-за `deck(5)` на: малая колода — fallback-only; восемь непересекающихся рук на группу — сертификат `min_removed >= 8`; river с семью удалениями даёт долю `0 %`.
 
-- [ ] **Step 2: Зафиксировать фактическое решение ворот**
+- [x] **Step 2: Зафиксировать фактическое решение ворот**
 
 Разрешить подготовку PR B только для малых таблиц; полный build и обучение оставить запрещёнными без отдельного решения владельца.
 
-- [ ] **Step 3: Проверить и зафиксировать**
+- [x] **Step 3: Проверить и зафиксировать**
 
 Run: `cargo fmt --check --manifest-path native/hu20-buckets/Cargo.toml; cargo test --manifest-path native/hu20-buckets/Cargo.toml; git diff --check`
 

@@ -25,6 +25,7 @@ K50, форматы `HU20BKT1`, Python, trainer, CFR, checkpoint и обучен
 
 - Базовый commit: `dd58361de0ab8576457e649cb3e2d491aba7b811`.
 - Commit реализации: `6d3c20b`, `6ad268f`, `b31c219`, `fa6d646`.
+- Commit точного сертификата: `95502399bff2c38ad81c7a3e1a1dfb41f8898cef`.
 - Карта — Table 1 из Johanson et al., *Evaluating State-Space Abstractions
   in Extensive-Form Games*, AAMAS 2013. Номера `1..8` переводятся во
   внутренние `0..7`.
@@ -46,8 +47,9 @@ cargo test --manifest-path native/hu20-buckets/Cargo.toml
 git diff --check
 ```
 
-Финальный полный прогон: 77 unit-тестов crates и 12 unit-тестов binary
-прошли; 13 явно resource-heavy тестов остались ignored. Oracle сравнил все
+Финальный полный прогон после commit `9550239`: 78 unit-тестов crates и 12
+unit-тестов binary прошли; 13 явно resource-heavy тестов остались ignored.
+Oracle сравнил все
 восемь компонент на парной, monotone-flush и straight досках. Карта проверена
 для всех 169 классов и 24 глобальных перестановок мастей.
 
@@ -80,6 +82,22 @@ git diff --check
 Следствие точное, а не выборочное: `any_empty_weight / total_weight = 0 %`
 и доля каждой отдельной группы тоже `0 %`. Диагностика не использует
 `evaluate`, не строит таблицы и не запускает обучение.
+
+Воспроизводимый прогон `cargo test --manifest-path
+native/hu20-buckets/Cargo.toml
+ochs_full_deck_groups_require_at_least_eight_removed_cards -- --nocapture`
+напечатал следующие сертификаты:
+
+```text
+group=0: 2c 3c, 2d 3d, 2h 3h, 2s 3s, 4c 5c, 4d 5d, 4h 5h, 4s 5s
+group=1: 2c 8c, 2d 8d, 2h 8h, 2s 8s, 3c 9c, 3d 9d, 3h 9h, 3s 9s
+group=2: 3c Tc, 3d Td, 3h Th, 3s Ts, 5c 6c, 5d 6d, 5h 6h, 5s 6s
+group=3: 2c 2d, 2h 2s, 3c Jc, 3d Jd, 3h Jh, 3s Js, 4c Qc, 4d Qd
+group=4: 6c Qc, 6d Qd, 6h Qh, 6s Qs, 7c Tc, 7d Td, 7h Th, 7s Ts
+group=5: 2c Ac, 2d Ad, 2h Ah, 2s As, 3c 3d, 3h 3s, 4c 4d, 4h 4s
+group=6: 6c 6d, 6h 6s, 7c 7d, 7h 7s, 8c Ac, 8d Ad, 8h Ah, 8s As
+group=7: 8c 8d, 8h 8s, 9c 9d, 9h 9s, Tc Td, Th Ts, Jc Jd, Jh Js
+```
 
 ## Ресурсы и ограничения
 
