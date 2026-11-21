@@ -5687,78 +5687,103 @@ mod tests {
         }
     }
 
-    #[test]
-    #[ignore = "resource-heavy"]
-    fn libratus_kmeans_cdf_mean_matches_kmeans_iterations() {
-        let assert_matches = |points: &[f32],
-                              dim: usize,
-                              weights: &[u64],
-                              k: usize,
-                              max_iterations: usize,
-                              label: &str| {
-            let expected = kmeans(points, dim, weights, k, 2026112101, max_iterations);
-            let actual = kmeans_cdf(
-                points,
-                dim,
-                weights,
-                k,
-                2026112101,
-                max_iterations,
-                CdfCentroidMode::Mean,
+    fn assert_kmeans_cdf_mean_matches_kmeans(
+        points: &[f32],
+        dim: usize,
+        weights: &[u64],
+        k: usize,
+        max_iterations: usize,
+        label: &str,
+    ) {
+        let expected = kmeans(points, dim, weights, k, 2026112101, max_iterations);
+        let actual = kmeans_cdf(
+            points,
+            dim,
+            weights,
+            k,
+            2026112101,
+            max_iterations,
+            CdfCentroidMode::Mean,
+        );
+        for (index, (actual, expected)) in
+            actual.centroids.iter().zip(&expected.centroids).enumerate()
+        {
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{label}: cluster={}, coordinate={}, actual_bits={:#010x}, expected_bits={:#010x}",
+                index / dim,
+                index % dim,
+                actual.to_bits(),
+                expected.to_bits(),
             );
-            for (index, (actual, expected)) in
-                actual.centroids.iter().zip(&expected.centroids).enumerate()
-            {
-                assert_eq!(
-                    actual.to_bits(),
-                    expected.to_bits(),
-                    "{label}: cluster={}, coordinate={}, actual_bits={:#010x}, expected_bits={:#010x}",
-                    index / dim,
-                    index % dim,
-                    actual.to_bits(),
-                    expected.to_bits(),
-                );
-            }
-            for (iteration, (actual, expected)) in
-                actual.objective.iter().zip(&expected.objective).enumerate()
-            {
-                assert_eq!(
-                    actual.to_bits(),
-                    expected.to_bits(),
-                    "{label}: iteration={iteration}, actual_bits={:#010x}, expected_bits={:#010x}",
-                    actual.to_bits(),
-                    expected.to_bits(),
-                );
-            }
-            assert_eq!(actual.objective.len(), expected.objective.len(), "{label}");
+        }
+        for (iteration, (actual, expected)) in
+            actual.objective.iter().zip(&expected.objective).enumerate()
+        {
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{label}: iteration={iteration}, actual_bits={:#010x}, expected_bits={:#010x}",
+                actual.to_bits(),
+                expected.to_bits(),
+            );
+        }
+        assert_eq!(actual.objective.len(), expected.objective.len(), "{label}");
 
-            for (index, point) in points.chunks_exact(dim).enumerate() {
-                let mut expected_bucket = 0u16;
-                let mut best_distance = f32::INFINITY;
-                for center in 0..k {
-                    let distance = l1(point, &expected.centroids[center * dim..(center + 1) * dim]);
-                    if distance < best_distance {
-                        expected_bucket = center as u16;
-                        best_distance = distance;
-                    }
+        for (index, point) in points.chunks_exact(dim).enumerate() {
+            let mut expected_bucket = 0u16;
+            let mut best_distance = f32::INFINITY;
+            for center in 0..k {
+                let distance = l1(point, &expected.centroids[center * dim..(center + 1) * dim]);
+                if distance < best_distance {
+                    expected_bucket = center as u16;
+                    best_distance = distance;
                 }
-                assert_eq!(
-                    actual.assignment[index], expected_bucket,
-                    "{label}, point={index}"
-                );
             }
-        };
+            assert_eq!(
+                actual.assignment[index], expected_bucket,
+                "{label}, point={index}"
+            );
+        }
+    }
 
+    #[test]
+    fn libratus_kmeans_cdf_mean_matches_kmeans_fast() {
         let synthetic = [
             0.0, 0.2, 1.0, 0.0, 0.4, 1.0, 0.1, 0.7, 1.0, 0.4, 0.9, 1.0, 0.7, 1.0, 1.0, 1.0, 1.0,
             1.0,
         ];
-        assert_matches(&synthetic, 3, &[3, 2, 5, 7, 11, 13], 4, 3, "synthetic");
+        assert_kmeans_cdf_mean_matches_kmeans(
+            &synthetic,
+            3,
+            &[3, 2, 5, 7, 11, 13],
+            4,
+            3,
+            "synthetic",
+        );
 
         let deck = deck(7);
         let river = RiverTable::build(&deck);
         let turn = StreetFeatures::build(&deck, 4, 50, &river);
-        assert_matches(
+        let points = 16usize.min(turn.weight.len());
+        assert_kmeans_cdf_mean_matches_kmeans(
+            &turn.cdf[..points * turn.bins],
+            turn.bins,
+            &turn.weight[..points],
+            4,
+            3,
+            "ranks7-turn-cdf",
+        );
+    }
+
+    #[test]
+    #[ignore = "resource-heavy"]
+    fn libratus_kmeans_cdf_mean_matches_kmeans_k50() {
+        let deck = deck(7);
+        let river = RiverTable::build(&deck);
+        let turn = StreetFeatures::build(&deck, 4, 50, &river);
+        assert_kmeans_cdf_mean_matches_kmeans(
             &turn.cdf,
             turn.bins,
             &turn.weight,
