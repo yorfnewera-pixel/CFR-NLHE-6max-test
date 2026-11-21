@@ -1,3 +1,0 @@
-﻿output_directory=C:\Users\Cassmall\Desktop\CFR-NLHE-6max-test\results\potential-emd-k10-control-20261101
-process_id=8992
-exit_code=
