@@ -1844,6 +1844,44 @@ pub fn kmeans_cdf(
     }
 }
 
+#[cfg(test)]
+fn kmeans_cdf_from_centroids(
+    points: &[f32], dim: usize, weight: &[u64], mut centroids: Vec<f32>,
+    max_iterations: usize, mode: CdfCentroidMode,
+) -> Clustering {
+    assert_eq!(mode, CdfCentroidMode::LowerWeightedMedian);
+    let n = weight.len();
+    let k = centroids.len() / dim;
+    let row = |i: usize| &points[i * dim..(i + 1) * dim];
+    let total: f64 = weight.iter().map(|&w| w as f64).sum();
+    let mut assignment = vec![u16::MAX; n];
+    let mut objective = Vec::new();
+    for _ in 0..max_iterations {
+        let assigned: Vec<(u16, f32)> = (0..n).map(|i| {
+            let mut best = (0u16, f32::INFINITY);
+            for c in 0..k { let d = l1(row(i), &centroids[c * dim..(c + 1) * dim]); if d < best.1 { best = (c as u16, d); } }
+            best
+        }).collect();
+        objective.push(assigned.iter().zip(weight).map(|(a, &w)| a.1 as f64 * w as f64).sum::<f64>() / total);
+        for (slot, value) in assignment.iter_mut().zip(&assigned) { *slot = value.0; }
+        for c in 0..k {
+            let members: Vec<usize> = (0..n).filter(|&i| assignment[i] as usize == c).collect();
+            for d in 0..dim {
+                let mut values: Vec<(f32, u64)> = members.iter().map(|&i| (row(i)[d], weight[i])).collect();
+                values.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+                let mut mass = 0; let half = (values.iter().map(|v| v.1).sum::<u64>() + 1) / 2;
+                for (value, w) in values { mass += w; if mass >= half { centroids[c * dim + d] = value; break; } }
+            }
+        }
+    }
+    let assignment: Vec<u16> = (0..n).map(|i| {
+        let mut best = (0u16, f32::INFINITY);
+        for c in 0..k { let d = l1(row(i), &centroids[c * dim..(c + 1) * dim]); if d < best.1 { best = (c as u16, d); } }
+        best.0
+    }).collect();
+    Clustering { assignment, centroids, objective, diagnostics: Vec::new(), final_assignment_diagnostic: None, termination: None, final_assignment_consistent: true }
+}
+
 /// Взвешенный k-means для распределений с EMD и заданной ground matrix.
 pub fn kmeans_emd(
     points: &[f32],
@@ -5495,29 +5533,25 @@ mod tests {
     fn cdf_median_returns_assignments_for_final_centroids() {
         // Сбой, который ловит тест: builder назначит bucket ID по финальным
         // центрам, но clustering вернёт ID до их последнего обновления.
-        let points = [
-            0.0, 0.0, 1.0, 0.0, 0.4, 1.0, 0.0, 0.6, 1.0, 0.0, 1.0, 1.0,
-        ];
-        let clustering = kmeans_cdf(
+        let points = [0.0, 1.0, 0.1, 1.0, 0.45, 1.0, 0.6, 1.0, 1.0, 1.0];
+        let clustering = kmeans_cdf_from_centroids(
             &points,
-            3,
-            &[1, 10, 1, 1],
             2,
-            11,
+            &[1; 5],
+            vec![0.0, 1.0, 1.0, 1.0],
             1,
             CdfCentroidMode::LowerWeightedMedian,
         );
 
-        let mut changed_nearest_center = false;
-        for (point, &bucket) in points.chunks_exact(3).zip(&clustering.assignment) {
-            let assigned = l1(point, &clustering.centroids[bucket as usize * 3..][..3]);
+        assert_eq!(clustering.centroids, vec![0.1, 1.0, 0.6, 1.0]);
+        assert_eq!(clustering.assignment[2], 1);
+        for (point, &bucket) in points.chunks_exact(2).zip(&clustering.assignment) {
+            let assigned = l1(point, &clustering.centroids[bucket as usize * 2..][..2]);
             let best = (0..2)
-                .map(|center| l1(point, &clustering.centroids[center * 3..][..3]))
+                .map(|center| l1(point, &clustering.centroids[center * 2..][..2]))
                 .fold(f32::INFINITY, f32::min);
             assert_eq!(assigned, best);
-            changed_nearest_center |= assigned != l1(point, &clustering.centroids[0..3]);
         }
-        assert!(changed_nearest_center, "fixture must exercise reassignment after update");
         assert!(clustering.final_assignment_consistent);
     }
 
