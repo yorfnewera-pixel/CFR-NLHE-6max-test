@@ -5495,25 +5495,30 @@ mod tests {
     fn cdf_median_returns_assignments_for_final_centroids() {
         // Сбой, который ловит тест: builder назначит bucket ID по финальным
         // центрам, но clustering вернёт ID до их последнего обновления.
-        let points = [0.0, 0.2, 1.0, 0.0, 0.8, 1.0, 0.0, 1.0, 1.0];
+        let points = [
+            0.0, 0.0, 1.0, 0.0, 0.4, 1.0, 0.0, 0.6, 1.0, 0.0, 1.0, 1.0,
+        ];
         let clustering = kmeans_cdf(
             &points,
             3,
-            &[1, 3, 1],
+            &[1, 10, 1, 1],
             2,
             11,
-            3,
+            1,
             CdfCentroidMode::LowerWeightedMedian,
         );
 
-        assert!(clustering.final_assignment_consistent);
+        let mut changed_nearest_center = false;
         for (point, &bucket) in points.chunks_exact(3).zip(&clustering.assignment) {
             let assigned = l1(point, &clustering.centroids[bucket as usize * 3..][..3]);
             let best = (0..2)
                 .map(|center| l1(point, &clustering.centroids[center * 3..][..3]))
                 .fold(f32::INFINITY, f32::min);
             assert_eq!(assigned, best);
+            changed_nearest_center |= assigned != l1(point, &clustering.centroids[0..3]);
         }
+        assert!(changed_nearest_center, "fixture must exercise reassignment after update");
+        assert!(clustering.final_assignment_consistent);
     }
 
     #[test]
