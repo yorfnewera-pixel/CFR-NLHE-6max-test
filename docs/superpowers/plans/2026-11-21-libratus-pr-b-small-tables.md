@@ -16,7 +16,7 @@
 - Не менять K50, `HU20BKT1`, CFR, checkpoint или существующий Python-читатель K50.
 - Mean — основной режим turn; median — отдельный экспериментальный режим манифеста. River всегда OCHS-8/L2.
 - EMD — `sum(abs(CDF_i - CDF'_i))`; tie-break — `first_minimum_emd`.
-- Файлы записываются атомарно; одинаковые входы дают идентичный SHA-256. Первый выпуск использует `seed=2026112101`, три рестарта, weighted sample `min(20_000, N)`, максимум 50 итераций, порог смены массы `1e-4` и сохранение прежнего центра пустого кластера.
+- Файлы записываются атомарно; одинаковые входы дают идентичный SHA-256. Первый выпуск использует `seed=2026112101`, три рестарта, weighted sample до `20_000` с replacement и вероятностью по весу (без весов в k-means); при `N ≤ 20_000` — все точки с исходными весами. Максимум 50 итераций, порог смены массы `1e-4`, сохранение прежнего центра пустого кластера; побеждает минимум полной взвешенной ошибки, затем меньший индекс рестарта.
 
 ## Review Focus
 
@@ -110,7 +110,7 @@ Expected: PASS.
 
 - [ ] **Step 2: Запустить целевые тесты**
 
-Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml potential_bucket_table -- --exact; pytest tests/test_equity_buckets.py -k potential`
+Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml libratus_bucket_table -- --exact; pytest tests/test_equity_buckets.py -k libratus`
 Expected: FAIL до реализации.
 
 - [ ] **Step 3: Реализовать новый читатель рядом с K50**
@@ -120,7 +120,7 @@ Expected: FAIL до реализации.
 
 - [ ] **Step 4: Проверить читатели**
 
-Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml potential_bucket_table; pytest tests/test_equity_buckets.py -k potential`
+Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml libratus_bucket_table; pytest tests/test_equity_buckets.py -k libratus`
 Expected: PASS.
 
 ### Task 4: OCHS-8/L2, малый builder, manifest и воспроизводимость
@@ -136,11 +136,12 @@ Expected: PASS.
 - [ ] **Step 1: Добавить падающие binary-тесты разбора параметров и manifest**
 
 Проверить L2-OCHS на oracle-векторах, воспроизводимую weighted-подвыборку и
-потоковое назначение; проверить регрессию turn-mean `K=50` против current
-`kmeans` на той же малой колоде, seed и выборке. Проверить отказ
+потоковое назначение; проверить регрессию turn-mean `K=50` против результата
+настоящего `--abstraction equity` на `ranks=7` с теми же seed и входами.
+Проверить отказ
 неподдерживаемых `K`, полной колоды и неизвестного режима; проверить отдельное
-имя режима, L1/L2-конвенции, seed/restarts/sample, empty-cluster rule и
-SHA-256 в manifest.
+имя режима, L1/L2-конвенции, seed/restarts/sample, empty-cluster rule,
+критерий выбора рестарта и SHA-256 в manifest.
 
 - [ ] **Step 2: Запустить binary-тесты**
 
@@ -173,9 +174,11 @@ Expected: PASS; два одинаковых прогона дают равные
 
 - [ ] **Step 1: Записать сравнение режимов**
 
-Зафиксировать полную взвешенную L1 CDF-ошибку, взвешенные размеры бакетов,
-число пустых кластеров, итерации, время, SHA-256 и ограничение: после отчёта
-не переходить к PR C.
+Зафиксировать полную взвешенную L1 CDF-ошибку turn, полную взвешенную L2
+OCHS-ошибку river, взвешенные размеры бакетов, число пустых кластеров,
+итерации, время, SHA-256 и ограничение: на `ranks=7` часть OCHS-компонент
+использует fallback, поэтому river-метрики не переносятся на полную колоду;
+после отчёта не переходить к PR C.
 
 - [ ] **Step 2: Полная проверка**
 
