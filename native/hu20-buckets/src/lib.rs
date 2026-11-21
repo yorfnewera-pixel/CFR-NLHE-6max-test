@@ -8324,4 +8324,42 @@ mod tests {
             any_empty_weight as f64 / total_weight as f64
         );
     }
+
+    #[test]
+    fn ochs_full_deck_groups_require_at_least_eight_removed_cards() {
+        // Сбой, который ловит тест: для некоторой группы не существует восьми
+        // непересекающихся рук, и семь удалённых карт могут её опустошить.
+        let deck = deck(13);
+        let hands = combinations(&deck, 2);
+        for group in 0..OCHS_GROUP_COUNT as u8 {
+            let mut occupied = 0u64;
+            let mut certificate = Vec::new();
+            for hand in hands
+                .iter()
+                .filter(|hand| ochs_group([hand[0], hand[1]]) == group)
+            {
+                let mask = (1u64 << hand[0]) | (1u64 << hand[1]);
+                if occupied & mask == 0 {
+                    occupied |= mask;
+                    certificate.push([hand[0], hand[1]]);
+                    if certificate.len() == 8 {
+                        break;
+                    }
+                }
+            }
+            assert_eq!(certificate.len(), 8, "group {group}");
+            for hand in &certificate {
+                assert_eq!(ochs_group(*hand), group);
+            }
+            assert_eq!(occupied.count_ones(), 16, "group {group}");
+            println!(
+                "OCHS full-deck certificate: group={group}, hands={}",
+                certificate
+                    .iter()
+                    .map(|hand| format!("{} {}", card_name(hand[0]), card_name(hand[1])))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
 }
