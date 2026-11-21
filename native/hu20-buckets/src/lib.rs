@@ -1720,10 +1720,17 @@ pub fn kmeans_cdf(
     max_iterations: usize,
     mode: CdfCentroidMode,
 ) -> Clustering {
-    if mode == CdfCentroidMode::Mean {
-        return kmeans(points, dim, weight, k, seed, max_iterations);
-    }
+    let centroids = kmeans_cdf_initial_centroids(points, dim, weight, k, seed);
+    kmeans_cdf_from_centroids(points, dim, weight, centroids, max_iterations, mode)
+}
 
+fn kmeans_cdf_initial_centroids(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    k: usize,
+    seed: u64,
+) -> Vec<f32> {
     let n = weight.len();
     assert!(points.len() == n * dim && k <= n && k <= u16::MAX as usize);
     let row = |i: usize| &points[i * dim..(i + 1) * dim];
@@ -1771,19 +1778,32 @@ pub fn kmeans_cdf(
             .zip(&sample)
             .for_each(|(d, &i)| *d = d.min(l1(row(i), &fresh)));
     }
+    centroids
+}
 
+fn kmeans_cdf_from_centroids(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    mut centroids: Vec<f32>,
+    max_iterations: usize,
+    mode: CdfCentroidMode,
+) -> Clustering {
+    let n = weight.len();
+    let k = centroids.len() / dim;
+    let row = |i: usize| &points[i * dim..(i + 1) * dim];
+    let total: f64 = weight.iter().map(|&w| w as f64).sum();
     let mut assignment = vec![u16::MAX; n];
     let mut objective = Vec::new();
     for _ in 0..max_iterations {
         let assigned: Vec<(u16, f32)> = (0..n)
             .into_par_iter()
             .map(|i| {
-                let p = row(i);
                 let mut best = (0u16, f32::INFINITY);
                 for c in 0..k {
-                    let d = l1(p, &centroids[c * dim..(c + 1) * dim]);
-                    if d < best.1 {
-                        best = (c as u16, d);
+                    let distance = l1(row(i), &centroids[c * dim..(c + 1) * dim]);
+                    if distance < best.1 {
+                        best = (c as u16, distance);
                     }
                 }
                 best
@@ -1793,38 +1813,50 @@ pub fn kmeans_cdf(
             .iter()
             .zip(&assignment)
             .zip(weight)
-            .filter(|((a, old), _)| a.0 != **old)
-            .map(|(_, &w)| w as f64)
+            .filter(|((assigned, previous), _)| assigned.0 != **previous)
+            .map(|(_, &point_weight)| point_weight as f64)
             .sum();
         objective.push(
             assigned
                 .iter()
                 .zip(weight)
-                .map(|(a, &w)| a.1 as f64 * w as f64)
+                .map(|(assigned, &point_weight)| assigned.1 as f64 * point_weight as f64)
                 .sum::<f64>()
                 / total,
         );
-        for (slot, a) in assignment.iter_mut().zip(&assigned) {
-            *slot = a.0;
+        for (slot, value) in assignment.iter_mut().zip(&assigned) {
+            *slot = value.0;
         }
         for c in 0..k {
             let members: Vec<usize> = (0..n).filter(|&i| assignment[i] as usize == c).collect();
             if members.is_empty() {
                 continue;
             }
-            for coordinate in 0..dim {
-                let mut values: Vec<(f32, u64)> = members
-                    .iter()
-                    .map(|&i| (row(i)[coordinate], weight[i]))
-                    .collect();
-                values.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
-                let half_mass = (values.iter().map(|(_, w)| *w).sum::<u64>() + 1) / 2;
-                let mut accumulated = 0u64;
-                for (value, member_weight) in values {
-                    accumulated += member_weight;
-                    if accumulated >= half_mass {
-                        centroids[c * dim + coordinate] = value;
-                        break;
+            match mode {
+                CdfCentroidMode::Mean => {
+                    let mass: u64 = members.iter().map(|&i| weight[i]).sum();
+                    for d in 0..dim {
+                        let sum: f64 = members
+                            .iter()
+                            .map(|&i| row(i)[d] as f64 * weight[i] as f64)
+                            .sum();
+                        centroids[c * dim + d] = (sum / mass as f64) as f32;
+                    }
+                }
+                CdfCentroidMode::LowerWeightedMedian => {
+                    for d in 0..dim {
+                        let mut values: Vec<(f32, u64)> =
+                            members.iter().map(|&i| (row(i)[d], weight[i])).collect();
+                        values.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+                        let half = (values.iter().map(|value| value.1).sum::<u64>() + 1) / 2;
+                        let mut mass = 0u64;
+                        for (value, point_weight) in values {
+                            mass += point_weight;
+                            if mass >= half {
+                                centroids[c * dim + d] = value;
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -1833,6 +1865,19 @@ pub fn kmeans_cdf(
             break;
         }
     }
+    let assignment: Vec<u16> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let mut best = (0u16, f32::INFINITY);
+            for c in 0..k {
+                let distance = l1(row(i), &centroids[c * dim..(c + 1) * dim]);
+                if distance < best.1 {
+                    best = (c as u16, distance);
+                }
+            }
+            best.0
+        })
+        .collect();
     Clustering {
         assignment,
         centroids,
@@ -1840,45 +1885,8 @@ pub fn kmeans_cdf(
         diagnostics: Vec::new(),
         final_assignment_diagnostic: None,
         termination: None,
-        final_assignment_consistent: false,
+        final_assignment_consistent: true,
     }
-}
-
-fn kmeans_cdf_from_centroids(
-    points: &[f32], dim: usize, weight: &[u64], mut centroids: Vec<f32>,
-    max_iterations: usize, mode: CdfCentroidMode,
-) -> Clustering {
-    assert_eq!(mode, CdfCentroidMode::LowerWeightedMedian);
-    let n = weight.len();
-    let k = centroids.len() / dim;
-    let row = |i: usize| &points[i * dim..(i + 1) * dim];
-    let total: f64 = weight.iter().map(|&w| w as f64).sum();
-    let mut assignment = vec![u16::MAX; n];
-    let mut objective = Vec::new();
-    for _ in 0..max_iterations {
-        let assigned: Vec<(u16, f32)> = (0..n).map(|i| {
-            let mut best = (0u16, f32::INFINITY);
-            for c in 0..k { let d = l1(row(i), &centroids[c * dim..(c + 1) * dim]); if d < best.1 { best = (c as u16, d); } }
-            best
-        }).collect();
-        objective.push(assigned.iter().zip(weight).map(|(a, &w)| a.1 as f64 * w as f64).sum::<f64>() / total);
-        for (slot, value) in assignment.iter_mut().zip(&assigned) { *slot = value.0; }
-        for c in 0..k {
-            let members: Vec<usize> = (0..n).filter(|&i| assignment[i] as usize == c).collect();
-            for d in 0..dim {
-                let mut values: Vec<(f32, u64)> = members.iter().map(|&i| (row(i)[d], weight[i])).collect();
-                values.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-                let mut mass = 0; let half = (values.iter().map(|v| v.1).sum::<u64>() + 1) / 2;
-                for (value, w) in values { mass += w; if mass >= half { centroids[c * dim + d] = value; break; } }
-            }
-        }
-    }
-    let assignment: Vec<u16> = (0..n).map(|i| {
-        let mut best = (0u16, f32::INFINITY);
-        for c in 0..k { let d = l1(row(i), &centroids[c * dim..(c + 1) * dim]); if d < best.1 { best = (c as u16, d); } }
-        best.0
-    }).collect();
-    Clustering { assignment, centroids, objective, diagnostics: Vec::new(), final_assignment_diagnostic: None, termination: None, final_assignment_consistent: true }
 }
 
 /// Взвешенный k-means для распределений с EMD и заданной ground matrix.
@@ -5552,6 +5560,123 @@ mod tests {
             assert_eq!(assigned, best);
         }
         assert!(clustering.final_assignment_consistent);
+    }
+
+    #[test]
+    fn libratus_kmeans_cdf_tie_uses_first_minimum() {
+        let mut points = Vec::new();
+        let mut weights = Vec::new();
+        for _ in 0..100 {
+            points.extend_from_slice(&[0.0, 1.0]);
+            weights.push(1);
+        }
+        for _ in 0..100 {
+            points.extend_from_slice(&[1.0, 1.0]);
+            weights.push(1);
+        }
+        let midpoint = weights.len();
+        points.extend_from_slice(&[0.5, 1.0]);
+        weights.push(0);
+
+        for mode in [CdfCentroidMode::Mean, CdfCentroidMode::LowerWeightedMedian] {
+            let clustering = kmeans_cdf(&points, 2, &weights, 2, 2026112101, 1, mode);
+            let distances: Vec<f32> = (0..2)
+                .map(|center| {
+                    l1(
+                        &points[midpoint * 2..midpoint * 2 + 2],
+                        &clustering.centroids[center * 2..center * 2 + 2],
+                    )
+                })
+                .collect();
+            assert_eq!(distances[0].to_bits(), distances[1].to_bits(), "{mode:?}");
+            assert_eq!(clustering.assignment[midpoint], 0, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn libratus_kmeans_cdf_final_assignment_consistent() {
+        let points = [0.0, 1.0, 0.1, 1.0, 0.45, 1.0, 0.6, 1.0, 1.0, 1.0];
+        for mode in [CdfCentroidMode::Mean, CdfCentroidMode::LowerWeightedMedian] {
+            let clustering = kmeans_cdf(&points, 2, &[1; 5], 2, 2026112101, 1, mode);
+            assert!(clustering.final_assignment_consistent, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn libratus_kmeans_cdf_same_init_both_modes() {
+        let points = [0.0, 1.0, 0.2, 1.0, 0.7, 1.0, 1.0, 1.0];
+        let mean = kmeans_cdf(&points, 2, &[1; 4], 2, 2026112101, 0, CdfCentroidMode::Mean);
+        let median = kmeans_cdf(
+            &points,
+            2,
+            &[1; 4],
+            2,
+            2026112101,
+            0,
+            CdfCentroidMode::LowerWeightedMedian,
+        );
+        assert_eq!(
+            mean.centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            median
+                .centroids
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn libratus_kmeans_cdf_median_objective_non_increasing() {
+        let cases: [(&[f32], &[u64]); 2] = [
+            (&[0.0, 1.0, 0.0, 1.0, 1.0, 1.0], &[1, 1, 1]),
+            (
+                &[0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0],
+                &[3, 2, 4, 1],
+            ),
+        ];
+
+        for (points, weights) in cases {
+            let before = kmeans_cdf(
+                points,
+                points.len() / weights.len(),
+                weights,
+                1,
+                2026112101,
+                0,
+                CdfCentroidMode::LowerWeightedMedian,
+            );
+            let after = kmeans_cdf(
+                points,
+                points.len() / weights.len(),
+                weights,
+                1,
+                2026112101,
+                1,
+                CdfCentroidMode::LowerWeightedMedian,
+            );
+            let objective = |centroid: &[f32]| {
+                points
+                    .chunks_exact(centroid.len())
+                    .zip(weights)
+                    .map(|(point, &weight)| l1(point, centroid) as f64 * weight as f64)
+                    .sum::<f64>()
+            };
+            let before_objective = objective(&before.centroids);
+            let after_objective = objective(&after.centroids);
+            assert!(
+                after_objective <= before_objective,
+                "before={before_objective}, after={after_objective}, points={points:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs Task 4 builder"]
+    fn libratus_kmeans_cdf_mean_k50_matches_equity_builder() {
+        panic!("Task 4 must compare a real libratus-ochs turn table with --abstraction equity");
     }
 
     #[test]
