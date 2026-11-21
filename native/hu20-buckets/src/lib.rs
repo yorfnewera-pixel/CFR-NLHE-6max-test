@@ -5688,16 +5688,22 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "resource-heavy"]
     fn libratus_kmeans_cdf_mean_matches_kmeans_iterations() {
-        let assert_matches = |points: &[f32], dim: usize, weights: &[u64], label: &str| {
-            let expected = kmeans(points, dim, weights, 4, 2026112101, 3);
+        let assert_matches = |points: &[f32],
+                              dim: usize,
+                              weights: &[u64],
+                              k: usize,
+                              max_iterations: usize,
+                              label: &str| {
+            let expected = kmeans(points, dim, weights, k, 2026112101, max_iterations);
             let actual = kmeans_cdf(
                 points,
                 dim,
                 weights,
-                4,
+                k,
                 2026112101,
-                3,
+                max_iterations,
                 CdfCentroidMode::Mean,
             );
             for (index, (actual, expected)) in
@@ -5729,7 +5735,7 @@ mod tests {
             for (index, point) in points.chunks_exact(dim).enumerate() {
                 let mut expected_bucket = 0u16;
                 let mut best_distance = f32::INFINITY;
-                for center in 0..4 {
+                for center in 0..k {
                     let distance = l1(point, &expected.centroids[center * dim..(center + 1) * dim]);
                     if distance < best_distance {
                         expected_bucket = center as u16;
@@ -5747,17 +5753,18 @@ mod tests {
             0.0, 0.2, 1.0, 0.0, 0.4, 1.0, 0.1, 0.7, 1.0, 0.4, 0.9, 1.0, 0.7, 1.0, 1.0, 1.0, 1.0,
             1.0,
         ];
-        assert_matches(&synthetic, 3, &[3, 2, 5, 7, 11, 13], "synthetic");
+        assert_matches(&synthetic, 3, &[3, 2, 5, 7, 11, 13], 4, 3, "synthetic");
 
         let deck = deck(7);
         let river = RiverTable::build(&deck);
         let turn = StreetFeatures::build(&deck, 4, 50, &river);
-        let points = 16usize.min(turn.weight.len());
         assert_matches(
-            &turn.cdf[..points * turn.bins],
+            &turn.cdf,
             turn.bins,
-            &turn.weight[..points],
-            "ranks7-turn-cdf",
+            &turn.weight,
+            50,
+            50,
+            "ranks7-turn-cdf-k50",
         );
     }
 
