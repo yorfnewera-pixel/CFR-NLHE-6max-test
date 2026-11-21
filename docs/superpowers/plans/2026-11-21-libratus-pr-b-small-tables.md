@@ -39,23 +39,23 @@
 - Consumes: commit `95502399bff2c38ad81c7a3e1a1dfb41f8898cef` и вывод его полного прогона.
 - Produces: закрытые ворота с точным сертификатом и отчёт воспроизводимости.
 
-- [ ] **Step 1: Прогнать сертификат и полный crate suite после `9550239`**
+- [x] **Step 1: Прогнать сертификат и полный crate suite после `9550239`** (`9550239`)
 
 Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml ochs_full_deck_groups_require_at_least_eight_removed_cards -- --nocapture; cargo test --manifest-path native/hu20-buckets/Cargo.toml`
 Expected: PASS; получены восемь напечатанных сертификатов и число прошедших тестов.
 
-- [ ] **Step 2: Зафиксировать сертификат в отчёте и журнале**
+- [x] **Step 2: Зафиксировать сертификат в отчёте и журнале** (`49c2777`)
 
 Записать SHA commit, результат прогона и восемь сертификатов; заменить
 устаревшее измерение перед PR B утверждением `min_removed >= 8`; малая колода
 остаётся fallback-only.
 
-- [ ] **Step 3: Отметить выполненные чекбоксы и проверить документацию**
+- [x] **Step 3: Отметить выполненные чекбоксы и проверить документацию** (`49c2777`)
 
 Run: `git diff --check`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit** (`3343314`)
 
 Run: `git add articles/Libratus_buckets/EMD.md web_reports/libratus-ochs-pr-a-20261119.md docs/superpowers/plans/2026-11-21-ochs-empty-group-gate.md; git commit -m "docs: close OCHS empty-group gate"`
 Expected: создан отдельный commit до PR B.
