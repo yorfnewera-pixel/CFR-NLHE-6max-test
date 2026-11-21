@@ -822,7 +822,7 @@ where
         .expect("EMD assignment requires at least one centroid")?;
     for candidate in candidates {
         let candidate = candidate?;
-        if candidate.1 < best.1 {
+        if candidate.1 < best.1 || (candidate.1 == best.1 && candidate.0 < best.0) {
             best = candidate;
         }
     }
@@ -833,7 +833,12 @@ where
 fn first_minimum_emd_reference(candidates: Vec<(u16, f32)>) -> (u16, f32) {
     candidates
         .into_iter()
-        .min_by(|left, right| left.1.partial_cmp(&right.1).unwrap())
+        .min_by(|left, right| {
+            left.1
+                .partial_cmp(&right.1)
+                .unwrap()
+                .then_with(|| left.0.cmp(&right.0))
+        })
         .expect("reference candidates must not be empty")
 }
 
@@ -1684,6 +1689,148 @@ pub fn kmeans(
             if mass[c] > 0.0 {
                 for d in 0..dim {
                     centroids[c * dim + d] = (sums[c * dim + d] / mass[c]) as f32;
+                }
+            }
+        }
+        if moved / total < 1e-4 {
+            break;
+        }
+    }
+    Clustering {
+        assignment,
+        centroids,
+        objective,
+        diagnostics: Vec::new(),
+        final_assignment_diagnostic: None,
+        termination: None,
+        final_assignment_consistent: false,
+    }
+}
+
+/// Правило обновления центров для CDF-признаков turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CdfCentroidMode {
+    Mean,
+    LowerWeightedMedian,
+}
+
+/// Взвешенная кластеризация CDF с L1-расстоянием и детерминированным tie-break.
+/// Mean сохраняет байтовое поведение действующего K50-контроля.
+pub fn kmeans_cdf(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    k: usize,
+    seed: u64,
+    max_iterations: usize,
+    mode: CdfCentroidMode,
+) -> Clustering {
+    if mode == CdfCentroidMode::Mean {
+        return kmeans(points, dim, weight, k, seed, max_iterations);
+    }
+
+    let n = weight.len();
+    assert!(points.len() == n * dim && k <= n && k <= u16::MAX as usize);
+    let row = |i: usize| &points[i * dim..(i + 1) * dim];
+    let mut rng = Rng(seed);
+    let total: f64 = weight.iter().map(|&w| w as f64).sum();
+    let cumulative: Vec<f64> = weight
+        .iter()
+        .scan(0f64, |acc, &w| {
+            *acc += w as f64;
+            Some(*acc)
+        })
+        .collect();
+    let draw = |rng: &mut Rng| -> usize {
+        let target = rng.unit() * total;
+        cumulative.partition_point(|&c| c <= target).min(n - 1)
+    };
+    let sample: Vec<usize> = (0..n.min(200_000)).map(|_| draw(&mut rng)).collect();
+    let mut centroids: Vec<f32> = row(sample[0]).to_vec();
+    let mut nearest: Vec<f32> = sample
+        .iter()
+        .map(|&i| l1(row(i), &centroids[0..dim]))
+        .collect();
+    while centroids.len() < k * dim {
+        let sum: f64 = nearest.iter().map(|&d| d as f64).sum();
+        let pick = if sum > 0.0 {
+            let target = rng.unit() * sum;
+            let mut acc = 0f64;
+            let mut chosen = sample.len() - 1;
+            for (s, &d) in nearest.iter().enumerate() {
+                acc += d as f64;
+                if acc > target {
+                    chosen = s;
+                    break;
+                }
+            }
+            chosen
+        } else {
+            (rng.next() % sample.len() as u64) as usize
+        };
+        let start = centroids.len();
+        centroids.extend_from_slice(row(sample[pick]));
+        let fresh = centroids[start..start + dim].to_vec();
+        nearest
+            .par_iter_mut()
+            .zip(&sample)
+            .for_each(|(d, &i)| *d = d.min(l1(row(i), &fresh)));
+    }
+
+    let mut assignment = vec![u16::MAX; n];
+    let mut objective = Vec::new();
+    for _ in 0..max_iterations {
+        let assigned: Vec<(u16, f32)> = (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let p = row(i);
+                let mut best = (0u16, f32::INFINITY);
+                for c in 0..k {
+                    let d = l1(p, &centroids[c * dim..(c + 1) * dim]);
+                    if d < best.1 {
+                        best = (c as u16, d);
+                    }
+                }
+                best
+            })
+            .collect();
+        let moved: f64 = assigned
+            .iter()
+            .zip(&assignment)
+            .zip(weight)
+            .filter(|((a, old), _)| a.0 != **old)
+            .map(|(_, &w)| w as f64)
+            .sum();
+        objective.push(
+            assigned
+                .iter()
+                .zip(weight)
+                .map(|(a, &w)| a.1 as f64 * w as f64)
+                .sum::<f64>()
+                / total,
+        );
+        for (slot, a) in assignment.iter_mut().zip(&assigned) {
+            *slot = a.0;
+        }
+        for c in 0..k {
+            let members: Vec<usize> = (0..n).filter(|&i| assignment[i] as usize == c).collect();
+            if members.is_empty() {
+                continue;
+            }
+            for coordinate in 0..dim {
+                let mut values: Vec<(f32, u64)> = members
+                    .iter()
+                    .map(|&i| (row(i)[coordinate], weight[i]))
+                    .collect();
+                values.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
+                let half_mass = (values.iter().map(|(_, w)| *w).sum::<u64>() + 1) / 2;
+                let mut accumulated = 0u64;
+                for (value, member_weight) in values {
+                    accumulated += member_weight;
+                    if accumulated >= half_mass {
+                        centroids[c * dim + coordinate] = value;
+                        break;
+                    }
                 }
             }
         }
@@ -5324,6 +5471,39 @@ mod tests {
         let mut hashes: Vec<u64> = river.keys.iter().map(|&k| hash_key(k)).collect();
         hashes.sort_unstable();
         assert!(hashes.windows(2).all(|w| w[0] != w[1]));
+    }
+
+    #[test]
+    fn cdf_median_preserves_cdf_invariants() {
+        // Сбой, который ловит тест: median-обновление выбирает неверную сторону
+        // при чётном весе либо выдаёт немонотонный центр CDF.
+        let points = [0.0, 0.5, 1.0, 0.0, 1.0, 1.0];
+        let clustering = kmeans_cdf(
+            &points,
+            3,
+            &[2, 2],
+            1,
+            7,
+            1,
+            CdfCentroidMode::LowerWeightedMedian,
+        );
+
+        assert_eq!(clustering.centroids, vec![0.0, 0.5, 1.0]);
+        assert!(clustering
+            .centroids
+            .windows(2)
+            .all(|pair| pair[0] <= pair[1]));
+        assert_eq!(clustering.centroids[2], 1.0);
+    }
+
+    #[test]
+    fn cdf_tie_uses_first_minimum() {
+        // Сбой, который ловит тест: равная L1-дистанция выбирает не меньший
+        // индекс центра и нарушает контракт first_minimum_emd.
+        assert_eq!(
+            first_minimum_emd([(4u16, 1.0f32), (2, 1.0), (3, 2.0)].into_iter().map(Ok),),
+            Ok((2, 1.0))
+        );
     }
 
     #[test]

@@ -72,12 +72,13 @@ Expected: создан отдельный commit до PR B.
 - [ ] **Step 1: Добавить падающие unit-тесты median-центра и tie-break**
 
 Проверить lower weighted median для чётного веса, неубывание центра и последний
-элемент `1`; проверить меньший ID при одинаковой L1-дистанции.
+элемент `1`; проверить меньший ID при одинаковой L1-дистанции. Имена тестов:
+`cdf_median_preserves_cdf_invariants` и `cdf_tie_uses_first_minimum`.
 
 - [ ] **Step 2: Запустить целевые тесты**
 
-Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml cdf_median -- --exact`
-Expected: FAIL, так как режим и функция отсутствуют.
+Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml cdf_median`
+Expected: FAIL с ненулевым числом запущенных тестов, так как режим и функция отсутствуют.
 
 - [ ] **Step 3: Реализовать `kmeans_cdf`**
 
@@ -110,8 +111,8 @@ Expected: PASS.
 
 - [ ] **Step 2: Запустить целевые тесты**
 
-Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml libratus_bucket_table -- --exact; pytest tests/test_equity_buckets.py -k libratus`
-Expected: FAIL до реализации.
+Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml libratus_bucket_table; pytest tests/test_equity_buckets.py -k libratus`
+Expected: FAIL до реализации; каждый вывод содержит хотя бы один запущенный тест.
 
 - [ ] **Step 3: Реализовать новый читатель рядом с K50**
 
@@ -136,8 +137,11 @@ Expected: PASS.
 - [ ] **Step 1: Добавить падающие binary-тесты разбора параметров и manifest**
 
 Проверить L2-OCHS на oracle-векторах, воспроизводимую weighted-подвыборку и
-потоковое назначение; проверить регрессию turn-mean `K=50` против результата
-настоящего `--abstraction equity` на `ranks=7` с теми же seed и входами.
+потоковое назначение; проверить побайтную регрессию turn-mean `K=50` против
+результата настоящего `--abstraction equity` на `ranks=7` с теми же seed,
+инициализацией и параметрами выборки контроля. Новая схема sampling
+проверяется отдельным тестом; если контроль не поддерживает вход, builder
+останавливается с явной диагностикой.
 Проверить отказ
 неподдерживаемых `K`, полной колоды и неизвестного режима; проверить отдельное
 имя режима, L1/L2-конвенции, seed/restarts/sample, empty-cluster rule,
