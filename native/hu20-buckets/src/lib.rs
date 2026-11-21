@@ -1829,18 +1829,18 @@ fn kmeans_cdf_from_centroids(
         }
         for c in 0..k {
             let members: Vec<usize> = (0..n).filter(|&i| assignment[i] as usize == c).collect();
-            if members.is_empty() {
+            let member_mass: u64 = members.iter().map(|&i| weight[i]).sum();
+            if member_mass == 0 {
                 continue;
             }
             match mode {
                 CdfCentroidMode::Mean => {
-                    let mass: u64 = members.iter().map(|&i| weight[i]).sum();
                     for d in 0..dim {
                         let sum: f64 = members
                             .iter()
                             .map(|&i| row(i)[d] as f64 * weight[i] as f64)
                             .sum();
-                        centroids[c * dim + d] = (sum / mass as f64) as f32;
+                        centroids[c * dim + d] = (sum / member_mass as f64) as f32;
                     }
                 }
                 CdfCentroidMode::LowerWeightedMedian => {
@@ -5576,10 +5576,10 @@ mod tests {
         }
         let midpoint = weights.len();
         points.extend_from_slice(&[0.5, 1.0]);
-        weights.push(0);
+        weights.push(1);
 
         for mode in [CdfCentroidMode::Mean, CdfCentroidMode::LowerWeightedMedian] {
-            let clustering = kmeans_cdf(&points, 2, &weights, 2, 2026112101, 1, mode);
+            let clustering = kmeans_cdf(&points, 2, &weights, 2, 2026112101, 0, mode);
             let distances: Vec<f32> = (0..2)
                 .map(|center| {
                     l1(
@@ -5598,7 +5598,21 @@ mod tests {
         let points = [0.0, 1.0, 0.1, 1.0, 0.45, 1.0, 0.6, 1.0, 1.0, 1.0];
         for mode in [CdfCentroidMode::Mean, CdfCentroidMode::LowerWeightedMedian] {
             let clustering = kmeans_cdf(&points, 2, &[1; 5], 2, 2026112101, 1, mode);
-            assert!(clustering.final_assignment_consistent, "{mode:?}");
+            for (index, point) in points.chunks_exact(2).enumerate() {
+                let mut expected = 0u16;
+                let mut best_distance = f32::INFINITY;
+                for center in 0..2 {
+                    let distance = l1(point, &clustering.centroids[center * 2..center * 2 + 2]);
+                    if distance < best_distance {
+                        expected = center as u16;
+                        best_distance = distance;
+                    }
+                }
+                assert_eq!(
+                    clustering.assignment[index], expected,
+                    "{mode:?}, point={index}"
+                );
+            }
         }
     }
 
@@ -5674,9 +5688,98 @@ mod tests {
     }
 
     #[test]
+    fn libratus_kmeans_cdf_mean_matches_kmeans_iterations() {
+        let assert_matches = |points: &[f32], dim: usize, weights: &[u64], label: &str| {
+            let expected = kmeans(points, dim, weights, 4, 2026112101, 3);
+            let actual = kmeans_cdf(
+                points,
+                dim,
+                weights,
+                4,
+                2026112101,
+                3,
+                CdfCentroidMode::Mean,
+            );
+            for (index, (actual, expected)) in
+                actual.centroids.iter().zip(&expected.centroids).enumerate()
+            {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "{label}: cluster={}, coordinate={}, actual_bits={:#010x}, expected_bits={:#010x}",
+                    index / dim,
+                    index % dim,
+                    actual.to_bits(),
+                    expected.to_bits(),
+                );
+            }
+            for (iteration, (actual, expected)) in
+                actual.objective.iter().zip(&expected.objective).enumerate()
+            {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "{label}: iteration={iteration}, actual_bits={:#010x}, expected_bits={:#010x}",
+                    actual.to_bits(),
+                    expected.to_bits(),
+                );
+            }
+            assert_eq!(actual.objective.len(), expected.objective.len(), "{label}");
+
+            for (index, point) in points.chunks_exact(dim).enumerate() {
+                let mut expected_bucket = 0u16;
+                let mut best_distance = f32::INFINITY;
+                for center in 0..4 {
+                    let distance = l1(point, &expected.centroids[center * dim..(center + 1) * dim]);
+                    if distance < best_distance {
+                        expected_bucket = center as u16;
+                        best_distance = distance;
+                    }
+                }
+                assert_eq!(
+                    actual.assignment[index], expected_bucket,
+                    "{label}, point={index}"
+                );
+            }
+        };
+
+        let synthetic = [
+            0.0, 0.2, 1.0, 0.0, 0.4, 1.0, 0.1, 0.7, 1.0, 0.4, 0.9, 1.0, 0.7, 1.0, 1.0, 1.0, 1.0,
+            1.0,
+        ];
+        assert_matches(&synthetic, 3, &[3, 2, 5, 7, 11, 13], "synthetic");
+
+        let deck = deck(7);
+        let river = RiverTable::build(&deck);
+        let turn = StreetFeatures::build(&deck, 4, 50, &river);
+        let points = 16usize.min(turn.weight.len());
+        assert_matches(
+            &turn.cdf[..points * turn.bins],
+            turn.bins,
+            &turn.weight[..points],
+            "ranks7-turn-cdf",
+        );
+    }
+
+    #[test]
+    fn libratus_kmeans_cdf_zero_mass_cluster_keeps_centroid() {
+        for mode in [CdfCentroidMode::Mean, CdfCentroidMode::LowerWeightedMedian] {
+            let clustering = kmeans_cdf_from_centroids(
+                &[0.0, 1.0, 1.0, 1.0],
+                2,
+                &[1, 0],
+                vec![0.0, 1.0, 0.8, 1.0],
+                1,
+                mode,
+            );
+            assert_eq!(clustering.centroids[2..4], [0.8, 1.0], "{mode:?}");
+        }
+    }
+
+    #[test]
     #[ignore = "needs Task 4 builder"]
     fn libratus_kmeans_cdf_mean_k50_matches_equity_builder() {
-        panic!("Task 4 must compare a real libratus-ochs turn table with --abstraction equity");
+        panic!("running with --ignored must fail until Task 4 builds libratus-ochs turn tables for comparison with --abstraction equity");
     }
 
     #[test]
