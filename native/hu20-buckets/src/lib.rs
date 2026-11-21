@@ -1844,7 +1844,6 @@ pub fn kmeans_cdf(
     }
 }
 
-#[cfg(test)]
 fn kmeans_cdf_from_centroids(
     points: &[f32], dim: usize, weight: &[u64], mut centroids: Vec<f32>,
     max_iterations: usize, mode: CdfCentroidMode,
