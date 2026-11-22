@@ -69,24 +69,24 @@ Expected: создан отдельный commit до PR B.
 - Produces: `CdfCentroidMode::{Mean, LowerWeightedMedian}` и `kmeans_cdf(...) -> Clustering`.
 - Consumes: CDF points, weights, `first_minimum_emd`.
 
-- [ ] **Step 1: Добавить падающие unit-тесты median-центра и tie-break**
+- [x] **Step 1: Добавить падающие unit-тесты median-центра и tie-break** (`aa7a4b6`)
 
 Проверить lower weighted median для чётного веса, неубывание центра и последний
 элемент `1`; проверить меньший ID при одинаковой L1-дистанции. Имена тестов:
 `cdf_median_preserves_cdf_invariants` и `cdf_tie_uses_first_minimum`.
 
-- [ ] **Step 2: Запустить целевые тесты**
+- [x] **Step 2: Запустить целевые тесты** (`aa7a4b6`)
 
 Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml cdf_median`
 Expected: FAIL с ненулевым числом запущенных тестов, так как режим и функция отсутствуют.
 
-- [ ] **Step 3: Реализовать `kmeans_cdf`**
+- [x] **Step 3: Реализовать `kmeans_cdf`** (`06eba14`)
 
 Mean делегирует существующему `kmeans`. Median сортирует значения каждой
 координаты кластера по величине и выбирает первое со взвешенным префиксом не
 меньше половины массы; пустой кластер не обновляется.
 
-- [ ] **Step 4: Запустить unit-тесты кластеризации**
+- [x] **Step 4: Запустить unit-тесты кластеризации** (`3c2a8f6`, `226a00c`)
 
 Run: `cargo test --manifest-path native/hu20-buckets/Cargo.toml cdf_ -- --nocapture`
 Expected: PASS.
@@ -100,8 +100,12 @@ Expected: PASS.
 
 **Interfaces:**
 - Produces: Rust `LibratusBucketTable` и Python `LibratusBucketTable`, оба с
-  magic `HU20LIB1`, street, `K`, sorted hashes и `u16` bucket IDs.
+  magic `HU20LIB1`, `version=1`, street, `K`, sorted hashes и `u16` bucket IDs.
 - Consumes: `class_key`, `hash_key`, atomic writer.
+
+Формат `HU20LIB1` использует 28-байтовый заголовок (все поля little-endian):
+`magic[8] | version u32 | street u32 | K u32 | count u64`, затем идут
+`hashes u64×N` и `ids u16×N`.
 
 - [ ] **Step 1: Написать падающие тесты round-trip и отказов формата**
 
