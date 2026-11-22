@@ -19,6 +19,73 @@ GOLDEN = [
     (("2d", "2h"), ("Ad", "Kd", "Qd"), 0x000000000f0000020000000000000000, 0xe54792613f12b1c2),
 ]
 
+LIBRATUS_FIXTURE = bytes.fromhex(
+    "485532304c4942310100000002000000080000000200000000000000"
+    "ff625eac2523f71b5a4c36036a4d11f003000700"
+)
+LIBRATUS_FIXTURE_SHA256 = "dbff96bd85dd47e181714b7cfa207be27396f668dd22f51939877b7a61731d96"
+
+
+def _libratus_table(path):
+    # Импорт внутри helper сохраняет RED-доказательство на родительском commit:
+    # pytest собирает тесты, но новый читатель там ещё отсутствует.
+    from src.blueprint.equity_buckets import LibratusBucketTable
+    return LibratusBucketTable(path)
+
+
+def _write_libratus_fixture(path, raw=LIBRATUS_FIXTURE):
+    path.write_bytes(raw)
+    return path
+
+
+def test_libratus_round_trip_fixture_and_suit_isomorphism(tmp_path):
+    import hashlib
+
+    path = _write_libratus_fixture(tmp_path / "turn.bin")
+    table = _libratus_table(path)
+
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == LIBRATUS_FIXTURE_SHA256
+    assert (table.street, table.k, type(table.k)) == ("turn", 8, int)
+    assert table.bucket(("Ah", "Kh"), ("2h", "7c", "9d", "Js")) == 3
+    assert table.bucket(("As", "Ks"), ("2s", "7h", "9c", "Jd")) == 3
+    assert table.bucket(("Ah", "Kd"), ("2h", "7c", "9d", "Js")) == 7
+
+
+@pytest.mark.parametrize("name,mutate", [
+    ("magic", lambda raw: raw.__setitem__(slice(0, 8), b"HU20BKT1")),
+    ("version", lambda raw: raw.__setitem__(slice(8, 12), (2).to_bytes(4, "little"))),
+    ("short_header", lambda raw: raw.__delitem__(slice(27, None))),
+    ("count_size", lambda raw: raw.__setitem__(slice(20, 28), (3).to_bytes(8, "little"))),
+    ("unsorted_hashes", lambda raw: raw.__setitem__(slice(28, 44), raw[36:44] + raw[28:36])),
+    ("duplicate_hash", lambda raw: raw.__setitem__(slice(36, 44), raw[28:36])),
+    ("bucket_out_of_range", lambda raw: raw.__setitem__(slice(46, 48), (8).to_bytes(2, "little"))),
+    ("street", lambda raw: raw.__setitem__(slice(12, 16), (1).to_bytes(4, "little"))),
+    ("zero_k", lambda raw: raw.__setitem__(slice(16, 20), (0).to_bytes(4, "little"))),
+    ("empty", lambda raw: raw.__setitem__(slice(None), raw[:20] + (0).to_bytes(8, "little"))),
+])
+def test_libratus_rejects_invalid_format(tmp_path, name, mutate):
+    raw = bytearray(LIBRATUS_FIXTURE)
+    mutate(raw)
+    path = _write_libratus_fixture(tmp_path / f"{name}.bin", raw)
+
+    with pytest.raises(ValueError):
+        _libratus_table(path)
+
+
+def test_libratus_and_k50_readers_reject_each_others_magic(tmp_path):
+    libratus_path = _write_libratus_fixture(tmp_path / "libratus.bin")
+    k50_path = tmp_path / "k50.bin"
+    k50_path.write_bytes(
+        b"HU20BKT1" + np.array([2, 8], "<u4").tobytes()
+        + np.array([2], "<u8").tobytes()
+        + LIBRATUS_FIXTURE[28:]
+    )
+
+    with pytest.raises(ValueError):
+        BucketTable(libratus_path)
+    with pytest.raises(ValueError):
+        _libratus_table(k50_path)
+
 
 @pytest.mark.parametrize("hole,board,key,digest", GOLDEN)
 def test_class_key_matches_rust_builder(hole, board, key, digest):
