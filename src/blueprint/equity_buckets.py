@@ -82,12 +82,13 @@ class LibratusBucketTable:
             raise ValueError("file size does not match header")
         if raw[:8] != self.MAGIC:
             raise ValueError("not an HU20LIB1 table")
-        version, street, self.k = np.frombuffer(raw[8:20], dtype="<u4")
+        version, street, k = np.frombuffer(raw[8:20], dtype="<u4")
         if int(version) != self.VERSION:
             raise ValueError("unsupported format version")
         if int(street) not in self._STREETS:
             raise ValueError("unknown street")
-        if not 1 <= int(self.k) <= 65535:
+        self.k = int(k)
+        if not 1 <= self.k <= 65535:
             raise ValueError("K is out of range")
         count = int(np.frombuffer(raw[20:28], dtype="<u8")[0])
         if count < 1 or len(raw) != 28 + 10 * count:
