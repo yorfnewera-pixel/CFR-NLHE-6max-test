@@ -329,6 +329,103 @@ impl BucketTable {
     }
 }
 
+/// Таблица абстракции Libratus (`HU20LIB1`) для turn и river.
+pub struct LibratusBucketTable {
+    pub street: u32,
+    pub k: u32,
+    hashes: Vec<u64>,
+    buckets: Vec<u16>,
+}
+
+impl LibratusBucketTable {
+    const MAGIC: &'static [u8; 8] = b"HU20LIB1";
+    const VERSION: u32 = 1;
+
+    pub fn new(street: u32, k: u32, hashes: Vec<u64>, buckets: Vec<u16>) -> std::io::Result<Self> {
+        let table = Self {
+            street,
+            k,
+            hashes,
+            buckets,
+        };
+        table.validate("table")?;
+        Ok(table)
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(28 + self.hashes.len() * 10);
+        out.extend_from_slice(Self::MAGIC);
+        out.extend_from_slice(&Self::VERSION.to_le_bytes());
+        out.extend_from_slice(&self.street.to_le_bytes());
+        out.extend_from_slice(&self.k.to_le_bytes());
+        out.extend_from_slice(&(self.hashes.len() as u64).to_le_bytes());
+        for hash in &self.hashes {
+            out.extend_from_slice(&hash.to_le_bytes());
+        }
+        for bucket in &self.buckets {
+            out.extend_from_slice(&bucket.to_le_bytes());
+        }
+        out
+    }
+
+    pub fn read(path: &std::path::Path) -> std::io::Result<Self> {
+        use std::io::{Error, ErrorKind};
+        let invalid =
+            |why: &str| Error::new(ErrorKind::InvalidData, format!("{}: {why}", path.display()));
+        let bytes = std::fs::read(path)?;
+        if bytes.len() < 28 {
+            return Err(invalid("file size does not match header"));
+        }
+        if &bytes[..8] != Self::MAGIC {
+            return Err(invalid("not an HU20LIB1 table"));
+        }
+        let word = |start| u32::from_le_bytes(bytes[start..start + 4].try_into().unwrap());
+        if word(8) != Self::VERSION {
+            return Err(invalid("unsupported format version"));
+        }
+        let street = word(12);
+        let k = word(16);
+        let count = u64::from_le_bytes(bytes[20..28].try_into().unwrap());
+        let expected = 28usize
+            .checked_add((count as usize).saturating_mul(10))
+            .ok_or_else(|| invalid("file size does not match header"))?;
+        if bytes.len() != expected {
+            return Err(invalid("file size does not match header"));
+        }
+        let count = count as usize;
+        let hashes = bytes[28..28 + count * 8]
+            .chunks_exact(8)
+            .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        let buckets = bytes[28 + count * 8..]
+            .chunks_exact(2)
+            .map(|b| u16::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        Self::new(street, k, hashes, buckets).map_err(|error| invalid(&error.to_string()))
+    }
+
+    fn validate(&self, name: &str) -> std::io::Result<()> {
+        use std::io::{Error, ErrorKind};
+        let invalid = |why| Error::new(ErrorKind::InvalidData, format!("{name}: {why}"));
+        if self.street != 2 && self.street != 3 {
+            return Err(invalid("unknown street"));
+        }
+        if self.k == 0 || self.k > u16::MAX as u32 {
+            return Err(invalid("K is out of range"));
+        }
+        if self.hashes.is_empty() || self.hashes.len() != self.buckets.len() {
+            return Err(invalid("inconsistent header"));
+        }
+        if !self.hashes.windows(2).all(|pair| pair[0] < pair[1]) {
+            return Err(invalid("hashes are not strictly increasing"));
+        }
+        if self.buckets.iter().any(|&bucket| bucket as u32 >= self.k) {
+            return Err(invalid("bucket ID is out of range"));
+        }
+        Ok(())
+    }
+}
+
 pub fn combinations(cards: &[u8], k: usize) -> Vec<Vec<u8>> {
     fn go(cards: &[u8], k: usize, start: usize, current: &mut Vec<u8>, out: &mut Vec<Vec<u8>>) {
         if current.len() == k {

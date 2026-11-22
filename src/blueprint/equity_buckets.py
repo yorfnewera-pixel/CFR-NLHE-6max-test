@@ -69,6 +69,47 @@ class BucketTable:
         return int(self.buckets[index])
 
 
+class LibratusBucketTable:
+    """Строго валидируемая turn/river-таблица формата HU20LIB1."""
+
+    MAGIC = b"HU20LIB1"
+    VERSION = 1
+    _STREETS = {2: "turn", 3: "river"}
+
+    def __init__(self, path):
+        raw = Path(path).read_bytes()
+        if len(raw) < 28:
+            raise ValueError("file size does not match header")
+        if raw[:8] != self.MAGIC:
+            raise ValueError("not an HU20LIB1 table")
+        version, street, self.k = np.frombuffer(raw[8:20], dtype="<u4")
+        if int(version) != self.VERSION:
+            raise ValueError("unsupported format version")
+        if int(street) not in self._STREETS:
+            raise ValueError("unknown street")
+        if not 1 <= int(self.k) <= 65535:
+            raise ValueError("K is out of range")
+        count = int(np.frombuffer(raw[20:28], dtype="<u8")[0])
+        if count < 1 or len(raw) != 28 + 10 * count:
+            raise ValueError("file size does not match header")
+        self.street = self._STREETS[int(street)]
+        self.hashes = np.frombuffer(raw, dtype="<u8", count=count, offset=28)
+        self.buckets = np.frombuffer(raw, dtype="<u2", count=count, offset=28 + 8 * count)
+        if np.any(self.hashes[1:] <= self.hashes[:-1]):
+            raise ValueError("hashes are not strictly increasing")
+        if np.any(self.buckets >= self.k):
+            raise ValueError("bucket ID is out of range")
+
+    def bucket(self, hole, board):
+        if STREETS[len(board)] != self.street:
+            raise ValueError("Board size belongs to another street's table")
+        target = np.uint64(hash_key(class_key(hole, board)))
+        index = int(np.searchsorted(self.hashes, target))
+        if index >= len(self.hashes) or self.hashes[index] != target:
+            raise KeyError("Situation is missing from the bucket table")
+        return int(self.buckets[index])
+
+
 def write_table(path, street, k, buckets):
     """A table in the builder's format, from {class key: bucket}; for test fixtures."""
     code = {"flop": 1, "turn": 2, "river": 3}[street]
