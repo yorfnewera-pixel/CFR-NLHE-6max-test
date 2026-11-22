@@ -20,10 +20,13 @@ GOLDEN = [
 ]
 
 LIBRATUS_FIXTURE = bytes.fromhex(
-    "485532304c4942310100000002000000080000000200000000000000"
-    "ff625eac2523f71b5a4c36036a4d11f003000700"
+    (Path(__file__).parent / "fixtures" / "libratus-turn-k8.hex").read_text()
 )
 LIBRATUS_FIXTURE_SHA256 = "dbff96bd85dd47e181714b7cfa207be27396f668dd22f51939877b7a61731d96"
+K50_FIXTURE = (
+    b"HU20BKT1" + np.array([2, 50], "<u4").tobytes()
+    + np.array([2], "<u8").tobytes() + LIBRATUS_FIXTURE[28:]
+)
 
 
 def _libratus_table(path):
@@ -75,16 +78,24 @@ def test_libratus_rejects_invalid_format(tmp_path, name, mutate):
 def test_libratus_and_k50_readers_reject_each_others_magic(tmp_path):
     libratus_path = _write_libratus_fixture(tmp_path / "libratus.bin")
     k50_path = tmp_path / "k50.bin"
-    k50_path.write_bytes(
-        b"HU20BKT1" + np.array([2, 8], "<u4").tobytes()
-        + np.array([2], "<u8").tobytes()
-        + LIBRATUS_FIXTURE[28:]
-    )
+    k50_path.write_bytes(K50_FIXTURE)
 
     with pytest.raises(ValueError):
         BucketTable(libratus_path)
     with pytest.raises(ValueError):
         _libratus_table(k50_path)
+
+
+def test_libratus_k50_reader_preserves_fixture_bytes_and_ids(tmp_path):
+    path = tmp_path / "turn-k50.bin"
+    path.write_bytes(K50_FIXTURE)
+
+    table = BucketTable(path)
+
+    assert path.read_bytes() == K50_FIXTURE
+    assert (table.street, table.k) == ("turn", 50)
+    assert table.bucket(("Ah", "Kh"), ("2h", "7c", "9d", "Js")) == 3
+    assert table.bucket(("Ah", "Kd"), ("2h", "7c", "9d", "Js")) == 7
 
 
 @pytest.mark.parametrize("hole,board,key,digest", GOLDEN)

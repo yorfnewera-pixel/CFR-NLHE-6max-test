@@ -8948,12 +8948,12 @@ mod tests {
         }
     }
 
-    const LIBRATUS_FIXTURE: [u8; 48] = [
-        0x48, 0x55, 0x32, 0x30, 0x4c, 0x49, 0x42, 0x31, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
-        0x00, 0x08, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x62,
-        0x5e, 0xac, 0x25, 0x23, 0xf7, 0x1b, 0x5a, 0x4c, 0x36, 0x03, 0x6a, 0x4d, 0x11, 0xf0, 0x03,
-        0x00, 0x07, 0x00,
-    ];
+    fn libratus_fixture() -> Vec<u8> {
+        include_str!("../../../tests/fixtures/libratus-turn-k8.hex")
+            .split_whitespace()
+            .map(|byte| u8::from_str_radix(byte, 16).unwrap())
+            .collect()
+    }
 
     fn libratus_fixture_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("hu20-libratus-{name}-{}", std::process::id()))
@@ -9046,7 +9046,7 @@ mod tests {
         )
         .unwrap();
         let bytes = table.serialize();
-        assert_eq!(bytes, LIBRATUS_FIXTURE);
+        assert_eq!(bytes, libratus_fixture());
         assert_eq!(
             sha256(&bytes),
             [
@@ -9072,36 +9072,37 @@ mod tests {
 
     #[test]
     fn libratus_bucket_table_rejects_invalid_format() {
+        let fixture = libratus_fixture();
         let mut invalid = Vec::new();
-        let mut magic = LIBRATUS_FIXTURE;
+        let mut magic = fixture.clone();
         magic[..8].copy_from_slice(b"HU20BKT1");
         invalid.push(magic.to_vec());
-        let mut version = LIBRATUS_FIXTURE;
+        let mut version = fixture.clone();
         version[8..12].copy_from_slice(&2u32.to_le_bytes());
         invalid.push(version.to_vec());
-        invalid.push(LIBRATUS_FIXTURE[..27].to_vec());
-        let mut count = LIBRATUS_FIXTURE;
+        invalid.push(fixture[..27].to_vec());
+        let mut count = fixture.clone();
         count[20..28].copy_from_slice(&3u64.to_le_bytes());
         invalid.push(count.to_vec());
-        let mut unsorted = LIBRATUS_FIXTURE;
-        unsorted[28..36].copy_from_slice(&LIBRATUS_FIXTURE[36..44]);
-        unsorted[36..44].copy_from_slice(&LIBRATUS_FIXTURE[28..36]);
+        let mut unsorted = fixture.clone();
+        unsorted[28..36].copy_from_slice(&fixture[36..44]);
+        unsorted[36..44].copy_from_slice(&fixture[28..36]);
         invalid.push(unsorted.to_vec());
-        let mut duplicate = LIBRATUS_FIXTURE;
+        let mut duplicate = fixture.clone();
         let first_hash = duplicate[28..36].to_vec();
         duplicate[36..44].copy_from_slice(&first_hash);
         invalid.push(duplicate.to_vec());
-        let mut bucket = LIBRATUS_FIXTURE;
+        let mut bucket = fixture.clone();
         bucket[46..48].copy_from_slice(&8u16.to_le_bytes());
         invalid.push(bucket.to_vec());
-        let mut street = LIBRATUS_FIXTURE;
+        let mut street = fixture.clone();
         street[12..16].copy_from_slice(&1u32.to_le_bytes());
         invalid.push(street.to_vec());
-        let mut k = LIBRATUS_FIXTURE;
+        let mut k = fixture.clone();
         k[16..20].copy_from_slice(&0u32.to_le_bytes());
         invalid.push(k.to_vec());
         invalid.push(
-            LIBRATUS_FIXTURE[..20]
+            fixture[..20]
                 .iter()
                 .copied()
                 .chain(0u64.to_le_bytes())
@@ -9119,22 +9120,28 @@ mod tests {
     #[test]
     fn libratus_bucket_table_old_reader_rejects() {
         let path = libratus_fixture_path("old-reader");
-        std::fs::write(&path, LIBRATUS_FIXTURE).unwrap();
+        std::fs::write(&path, libratus_fixture()).unwrap();
         assert!(BucketTable::read(&path).is_err());
         std::fs::remove_file(path).unwrap();
     }
 
     #[test]
     fn libratus_bucket_table_k50_unchanged() {
+        let fixture = libratus_fixture();
         let mut bytes = b"HU20BKT1".to_vec();
         bytes.extend_from_slice(&2u32.to_le_bytes());
-        bytes.extend_from_slice(&8u32.to_le_bytes());
+        bytes.extend_from_slice(&50u32.to_le_bytes());
         bytes.extend_from_slice(&2u64.to_le_bytes());
-        bytes.extend_from_slice(&LIBRATUS_FIXTURE[28..]);
+        bytes.extend_from_slice(&fixture[28..]);
         let path = libratus_fixture_path("k50");
-        std::fs::write(&path, bytes).unwrap();
+        let written_path = libratus_fixture_path("k50-written");
+        std::fs::write(&path, &bytes).unwrap();
         let table = BucketTable::read(&path).unwrap();
+        table.write(&written_path).unwrap();
+        assert_eq!(std::fs::read(&written_path).unwrap(), bytes);
         std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(written_path).unwrap();
+        assert_eq!((table.street, table.k), (2, 50));
         assert_eq!(table.bucket(&[48, 44], &[0, 21, 30, 39]), Some(3));
         assert_eq!(table.bucket(&[48, 46], &[0, 21, 30, 39]), Some(7));
     }
