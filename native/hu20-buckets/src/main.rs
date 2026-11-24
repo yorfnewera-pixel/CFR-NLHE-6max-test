@@ -1,6 +1,7 @@
 //! hu20-buckets build --out DIR [--ranks 13] [--ks 50,200] [--bins 50] [--seed 1] [--iterations 100] [--turn-iterations N] [--flop-iterations N] [--diagnose-final-assignments] [--profile-flop-emd]
 //! hu20-buckets key HOLE BOARD     e.g. key "Ah Kh" "2h 7c 9d"
 use hu20_buckets::*;
+use rayon::prelude::*;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -57,6 +58,203 @@ fn validate_flop_iterations_abstraction(abstraction: &str, flop_iterations_expli
         abstraction == "potential" || !flop_iterations_explicit,
         "--flop-iterations requires --abstraction potential"
     );
+}
+
+fn validate_libratus_parameters(ranks: u8, ks: &[usize], bins: usize) -> Result<(), &'static str> {
+    if ranks != 7 || bins != 50 || ks.is_empty() || ks.iter().any(|&k| k != 50 && k != 200) {
+        return Err("libratus-ochs допускает только ranks=7, bins=50 и K=50/200");
+    }
+    Ok(())
+}
+
+fn build_libratus(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let out = PathBuf::from(arg(args, "--out", "libratus-buckets"));
+    let ranks: u8 = arg(args, "--ranks", "7").parse()?;
+    let bins: usize = arg(args, "--bins", "50").parse()?;
+    let ks: Vec<usize> = arg(args, "--ks", "50,200")
+        .split(',')
+        .map(str::parse)
+        .collect::<Result<_, _>>()?;
+    let seed: u64 = arg(args, "--seed", "2026112101").parse()?;
+    let iterations: usize = arg(args, "--iterations", "50").parse()?;
+    let centroid = arg(args, "--cdf-centroid", "mean");
+    let mode = match centroid.as_str() {
+        "mean" => CdfCentroidMode::Mean,
+        "lower-weighted-median" => CdfCentroidMode::LowerWeightedMedian,
+        _ => return Err("неизвестный CDF centroid".into()),
+    };
+    validate_libratus_parameters(ranks, &ks, bins)?;
+    if iterations == 0 || iterations > 50 {
+        return Err("число итераций должно быть от 1 до 50".into());
+    }
+    fs::create_dir_all(&out)?;
+    let (revision, dirty) = git_metadata()?;
+    let deck = deck(ranks);
+    let started = Instant::now();
+    eprintln!("river scalar equity");
+    let river = RiverTable::build(&deck);
+    eprintln!(
+        "turn features, elapsed={:.1}s",
+        started.elapsed().as_secs_f64()
+    );
+    let turn = StreetFeatures::build(&deck, 4, bins, &river);
+    eprintln!(
+        "river OCHS features, elapsed={:.1}s",
+        started.elapsed().as_secs_f64()
+    );
+    let boards = canonical_boards(&deck, 5);
+    let mut rows: Vec<(u128, u64, [f32; OCHS_GROUP_COUNT])> = boards
+        .par_iter()
+        .flat_map_iter(|board| {
+            river_ochs_equities(board, &deck)
+                .into_iter()
+                .map(move |(hole, feature)| {
+                    (class_key(&hole, board), orbit_size(&hole, board), feature)
+                })
+        })
+        .collect();
+    rows.par_sort_unstable_by_key(|row| row.0);
+    rows.dedup_by(|a, b| {
+        if a.0 == b.0 {
+            assert_eq!(a.1, b.1);
+            assert_eq!(a.2, b.2);
+            true
+        } else {
+            false
+        }
+    });
+    let river_keys: Vec<u128> = rows.iter().map(|r| r.0).collect();
+    let river_weights: Vec<u64> = rows.iter().map(|r| r.1).collect();
+    let river_points: Vec<f32> = rows.iter().flat_map(|r| r.2).collect();
+    assert_eq!(river.keys, river_keys, "неполный набор river классов");
+    for &k in &ks {
+        eprintln!(
+            "turn k={k}, elapsed={:.1}s",
+            started.elapsed().as_secs_f64()
+        );
+        let turn_result = if mode == CdfCentroidMode::Mean {
+            kmeans(&turn.cdf, bins, &turn.weight, k, seed, iterations)
+        } else {
+            kmeans_cdf(&turn.cdf, bins, &turn.weight, k, seed, iterations, mode)
+        };
+        emit_libratus_table(
+            &out,
+            2,
+            k,
+            &turn.keys,
+            &turn.weight,
+            &turn_result.assignment,
+            ranks,
+            &revision,
+            dirty,
+            seed,
+            iterations,
+            &centroid,
+        )?;
+        eprintln!(
+            "river k={k}, elapsed={:.1}s",
+            started.elapsed().as_secs_f64()
+        );
+        let mut best: Option<Clustering> = None;
+        for restart in 0..3 {
+            let candidate = libratus_l2(
+                &river_points,
+                OCHS_GROUP_COUNT,
+                &river_weights,
+                k,
+                seed,
+                seed.wrapping_add(restart),
+                iterations,
+            );
+            eprintln!(
+                "river k={k} restart={restart} objective={}",
+                candidate.objective.last().unwrap()
+            );
+            if best.as_ref().map_or(true, |b| {
+                candidate.objective.last().unwrap() < b.objective.last().unwrap()
+            }) {
+                best = Some(candidate);
+            }
+        }
+        emit_libratus_table(
+            &out,
+            3,
+            k,
+            &river_keys,
+            &river_weights,
+            &best.unwrap().assignment,
+            ranks,
+            &revision,
+            dirty,
+            seed,
+            iterations,
+            "mean",
+        )?;
+    }
+    eprintln!("complete elapsed={:.1}s", started.elapsed().as_secs_f64());
+    Ok(())
+}
+
+fn emit_libratus_table(
+    out: &Path,
+    street: u32,
+    k: usize,
+    keys: &[u128],
+    weights: &[u64],
+    assignment: &[u16],
+    ranks: u8,
+    revision: &str,
+    dirty: bool,
+    seed: u64,
+    iterations: usize,
+    centroid: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(keys.len(), assignment.len());
+    let mut rows: Vec<(u64, u16)> = keys
+        .iter()
+        .map(|&key| hash_key(key))
+        .zip(assignment.iter().copied())
+        .collect();
+    rows.sort_unstable_by_key(|r| r.0);
+    let table = LibratusBucketTable::new(
+        street,
+        k as u32,
+        rows.iter().map(|r| r.0).collect(),
+        rows.iter().map(|r| r.1).collect(),
+    )?;
+    let bytes = table.serialize();
+    let name = if street == 2 { "turn" } else { "river" };
+    let table_path = out.join(format!("libratus-{name}-k{k}.bin"));
+    let manifest_path = out.join(format!("libratus-{name}-k{k}.json"));
+    let mut manifest = LibratusManifest::for_table(
+        &bytes,
+        street,
+        k as u32,
+        keys.len() as u64,
+        weights.iter().sum(),
+        ranks,
+        revision,
+        dirty,
+    );
+    manifest.seed = seed;
+    manifest.max_iterations = iterations as u32;
+    if street == 2 {
+        manifest.centroid = centroid.into();
+        manifest.initialization = "k50-weighted-sample-200000".into();
+        manifest.restarts = 1;
+    }
+    atomic_write(&table_path, &bytes)?;
+    atomic_write(&manifest_path, &serde_json::to_vec_pretty(&manifest)?)?;
+    LibratusBucketTable::read_verified(&table_path, &manifest_path)?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn libratus_parameters_reject_full_deck_and_large_k() {
+    assert!(validate_libratus_parameters(7, &[50, 200], 50).is_ok());
+    assert!(validate_libratus_parameters(13, &[50], 50).is_err());
+    assert!(validate_libratus_parameters(7, &[1000], 50).is_err());
 }
 
 fn cards(text: &str) -> Vec<u8> {
@@ -160,6 +358,10 @@ fn bucket_summary(k: usize, assignment: &[u16], weight: &[u64], equity: &[f32]) 
 }
 
 fn build(args: &[String]) {
+    if arg(args, "--abstraction", "equity") == "libratus-ochs" {
+        build_libratus(args).unwrap_or_else(|error| panic!("ошибка libratus-ochs: {error}"));
+        return;
+    }
     let out = PathBuf::from(arg(args, "--out", "buckets"));
     let ranks: u8 = arg(args, "--ranks", "13").parse().unwrap();
     let bins: usize = arg(args, "--bins", "50").parse().unwrap();
@@ -478,6 +680,15 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("build") => build(&args),
+        Some("verify-libratus") => {
+            use sha2::{Digest, Sha256};
+            let table_path = args.get(2).expect("нужен путь к таблице");
+            let manifest_path = args.get(3).expect("нужен путь к манифесту");
+            let table =
+                LibratusBucketTable::read_verified(Path::new(table_path), Path::new(manifest_path))
+                    .expect("проверка таблицы и манифеста");
+            println!("{:x}", Sha256::digest(table.serialize()));
+        }
         Some("key") => {
             let (hole, board) = (cards(&args[2]), cards(&args[3]));
             let key = class_key(&hole, &board);

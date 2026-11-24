@@ -76,7 +76,7 @@ class LibratusBucketTable:
     VERSION = 1
     _STREETS = {2: "turn", 3: "river"}
 
-    def __init__(self, path):
+    def __init__(self, path, manifest_path=None):
         raw = Path(path).read_bytes()
         if len(raw) < 28:
             raise ValueError("file size does not match header")
@@ -100,6 +100,49 @@ class LibratusBucketTable:
             raise ValueError("hashes are not strictly increasing")
         if np.any(self.buckets >= self.k):
             raise ValueError("bucket ID is out of range")
+        if manifest_path is not None:
+            import hashlib
+            import json
+
+            manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+            expected_fields = {"format", "street", "k", "class_count", "total_weight", "ranks", "code_revision", "working_tree_dirty", "table_sha256", "canonicalization", "context", "normalization", "feature", "bins", "distance", "centroid", "ochs_map_sha256", "empty_group_rule", "seed", "initialization", "restarts", "restart_selection", "max_iterations", "stop_rule", "tie_break"}
+            if (manifest.get("format") != "HU20LIB1"
+                    or set(manifest) != expected_fields
+                    or manifest.get("street") != int(street)
+                    or manifest.get("k") != self.k
+                    or manifest.get("class_count") != count
+                    or manifest.get("table_sha256") != hashlib.sha256(raw).hexdigest()
+                    or manifest.get("feature") != ("turn-equity-cdf" if self.street == "turn" else "river-ochs-8")
+                    or manifest.get("distance") != ("cdf-l1-sum" if self.street == "turn" else "squared-l2")
+                    or manifest.get("bins") != (50 if self.street == "turn" else 0)
+                    or manifest.get("canonicalization") != "hole-current-board-suit-isomorphism-v1"
+                    or manifest.get("context") != "HU20-menu-V1"
+                    or manifest.get("normalization") != ("runout-count-cdf" if self.street == "turn" else "eligible-opponent-equity-half-ties")
+                    or manifest.get("restart_selection") != "minimum-full-weighted-objective-first-tie"
+                    or manifest.get("ochs_map_sha256") != "6483f50df6ebd7e51d37353be6040f1c1bfd800907f870991576ae31c8f0a335"
+                    or manifest.get("empty_group_rule") != "uniform-equity-fill-v1"
+                    or manifest.get("tie_break") != "first-minimum"
+                    or manifest.get("stop_rule") != "moved-weight-fraction-lt-1e-4"
+                    or not manifest.get("total_weight") or not manifest.get("code_revision")
+                    or not manifest.get("restarts") or not manifest.get("max_iterations")):
+                raise ValueError("manifest does not match table")
+            if manifest.get("ranks") != 7:
+                raise ValueError("unsupported deck in manifest")
+            if (not 1 <= manifest["max_iterations"] <= 50
+                    or (self.street == "turn" and (manifest["total_weight"] != 5651100
+                        or manifest["initialization"] != "k50-weighted-sample-200000"
+                        or manifest["restarts"] != 1 or manifest["centroid"] not in {"mean", "lower-weighted-median"}))
+                    or (self.street == "river" and (manifest["total_weight"] != 24864840
+                        or manifest["initialization"] != "all-weighted-if-n-le-20000-else-weighted-20000-with-replacement"
+                        or manifest["restarts"] != 3 or manifest["centroid"] != "weighted-mean"))):
+                raise ValueError("invalid manifest parameters")
+            if manifest.get("ranks") == 7:
+                expected_count, expected_hash = {
+                    "turn": (260862, "bafb46f8241f6e1048e51b995253a3763f2599e2d6c844f9626aa07ffbd993b0"),
+                    "river": (1103011, "3d06ba9dfe40250cb3d554888b1ec1bb55964562076e90da0e59eecd21eb78a6"),
+                }[self.street]
+                if count != expected_count or hashlib.sha256(raw[28:28 + 8 * count]).hexdigest() != expected_hash:
+                    raise ValueError("incomplete class set")
 
     def bucket(self, hole, board):
         if STREETS[len(board)] != self.street:

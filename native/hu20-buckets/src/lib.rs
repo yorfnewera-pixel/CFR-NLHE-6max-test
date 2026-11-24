@@ -337,9 +337,198 @@ pub struct LibratusBucketTable {
     buckets: Vec<u16>,
 }
 
+/// Метаданные, связывающие таблицу с параметрами её построения.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LibratusManifest {
+    pub format: String,
+    pub street: u32,
+    pub k: u32,
+    pub class_count: u64,
+    pub total_weight: u64,
+    pub ranks: u8,
+    pub code_revision: String,
+    pub working_tree_dirty: bool,
+    pub table_sha256: String,
+    pub canonicalization: String,
+    pub context: String,
+    pub normalization: String,
+    pub feature: String,
+    pub bins: u32,
+    pub distance: String,
+    pub centroid: String,
+    pub ochs_map_sha256: String,
+    pub empty_group_rule: String,
+    pub seed: u64,
+    pub initialization: String,
+    pub restarts: u32,
+    pub restart_selection: String,
+    pub max_iterations: u32,
+    pub stop_rule: String,
+    pub tie_break: String,
+}
+
+impl LibratusManifest {
+    pub fn for_table(
+        bytes: &[u8],
+        street: u32,
+        k: u32,
+        class_count: u64,
+        total_weight: u64,
+        ranks: u8,
+        revision: &str,
+        dirty: bool,
+    ) -> Self {
+        use sha2::{Digest, Sha256};
+        Self {
+            format: "HU20LIB1".into(),
+            street,
+            k,
+            class_count,
+            total_weight,
+            ranks,
+            code_revision: revision.into(),
+            working_tree_dirty: dirty,
+            table_sha256: format!("{:x}", Sha256::digest(bytes)),
+            canonicalization: "hole-current-board-suit-isomorphism-v1".into(),
+            context: "HU20-menu-V1".into(),
+            normalization: if street == 2 {
+                "runout-count-cdf"
+            } else {
+                "eligible-opponent-equity-half-ties"
+            }
+            .into(),
+            feature: if street == 2 {
+                "turn-equity-cdf"
+            } else {
+                "river-ochs-8"
+            }
+            .into(),
+            bins: if street == 2 { 50 } else { 0 },
+            distance: if street == 2 {
+                "cdf-l1-sum"
+            } else {
+                "squared-l2"
+            }
+            .into(),
+            centroid: "weighted-mean".into(),
+            ochs_map_sha256: "6483f50df6ebd7e51d37353be6040f1c1bfd800907f870991576ae31c8f0a335"
+                .into(),
+            empty_group_rule: "uniform-equity-fill-v1".into(),
+            seed: 2026112101,
+            initialization: "all-weighted-if-n-le-20000-else-weighted-20000-with-replacement"
+                .into(),
+            restarts: 3,
+            restart_selection: "minimum-full-weighted-objective-first-tie".into(),
+            max_iterations: 50,
+            stop_rule: "moved-weight-fraction-lt-1e-4".into(),
+            tie_break: "first-minimum".into(),
+        }
+    }
+}
+
 impl LibratusBucketTable {
     const MAGIC: &'static [u8; 8] = b"HU20LIB1";
     const VERSION: u32 = 1;
+
+    pub fn bucket(&self, hole: &[u8], board: &[u8]) -> Option<u16> {
+        if board.len() != self.street as usize + 2 {
+            return None;
+        }
+        let key = hash_key(class_key(hole, board));
+        self.hashes
+            .binary_search(&key)
+            .ok()
+            .map(|index| self.buckets[index])
+    }
+
+    pub fn read_verified(
+        path: &std::path::Path,
+        manifest_path: &std::path::Path,
+    ) -> std::io::Result<Self> {
+        use sha2::{Digest, Sha256};
+        let invalid = |msg| std::io::Error::new(std::io::ErrorKind::InvalidData, msg);
+        let manifest: LibratusManifest = serde_json::from_slice(&std::fs::read(manifest_path)?)
+            .map_err(|e| invalid(e.to_string()))?;
+        let bytes = std::fs::read(path)?;
+        let table = Self::parse_bytes(&bytes, path)?;
+        let feature = if table.street == 2 {
+            "turn-equity-cdf"
+        } else {
+            "river-ochs-8"
+        };
+        let distance = if table.street == 2 {
+            "cdf-l1-sum"
+        } else {
+            "squared-l2"
+        };
+        if manifest.format != "HU20LIB1"
+            || manifest.street != table.street
+            || manifest.k != table.k
+            || manifest.class_count != table.hashes.len() as u64
+            || manifest.table_sha256 != format!("{:x}", Sha256::digest(&bytes))
+            || manifest.feature != feature
+            || manifest.distance != distance
+            || manifest.bins != if table.street == 2 { 50 } else { 0 }
+            || manifest.canonicalization != "hole-current-board-suit-isomorphism-v1"
+            || manifest.context != "HU20-menu-V1"
+            || manifest.normalization
+                != if table.street == 2 {
+                    "runout-count-cdf"
+                } else {
+                    "eligible-opponent-equity-half-ties"
+                }
+            || manifest.restart_selection != "minimum-full-weighted-objective-first-tie"
+            || manifest.ochs_map_sha256
+                != "6483f50df6ebd7e51d37353be6040f1c1bfd800907f870991576ae31c8f0a335"
+            || manifest.empty_group_rule != "uniform-equity-fill-v1"
+            || manifest.tie_break != "first-minimum"
+            || manifest.stop_rule != "moved-weight-fraction-lt-1e-4"
+            || manifest.total_weight == 0
+            || manifest.code_revision.is_empty()
+            || manifest.restarts == 0
+            || manifest.max_iterations == 0
+        {
+            return Err(invalid("manifest does not match table".to_string()));
+        }
+        if manifest.ranks != 7 {
+            return Err(invalid("unsupported deck in manifest".to_string()));
+        }
+        if manifest.max_iterations > 50
+            || (table.street == 2
+                && (manifest.total_weight != 5651100
+                    || manifest.initialization != "k50-weighted-sample-200000"
+                    || manifest.restarts != 1
+                    || !matches!(manifest.centroid.as_str(), "mean" | "lower-weighted-median")))
+            || (table.street == 3
+                && (manifest.total_weight != 24864840
+                    || manifest.initialization
+                        != "all-weighted-if-n-le-20000-else-weighted-20000-with-replacement"
+                    || manifest.restarts != 3
+                    || manifest.centroid != "weighted-mean"))
+        {
+            return Err(invalid("invalid manifest parameters".to_string()));
+        }
+        {
+            let (count, expected) = if table.street == 2 {
+                (
+                    260862,
+                    "bafb46f8241f6e1048e51b995253a3763f2599e2d6c844f9626aa07ffbd993b0",
+                )
+            } else {
+                (
+                    1103011,
+                    "3d06ba9dfe40250cb3d554888b1ec1bb55964562076e90da0e59eecd21eb78a6",
+                )
+            };
+            if table.hashes.len() != count
+                || format!("{:x}", Sha256::digest(&bytes[28..28 + 8 * count])) != expected
+            {
+                return Err(invalid("incomplete class set".to_string()));
+            }
+        }
+        Ok(table)
+    }
 
     pub fn new(street: u32, k: u32, hashes: Vec<u64>, buckets: Vec<u16>) -> std::io::Result<Self> {
         let table = Self {
@@ -369,10 +558,14 @@ impl LibratusBucketTable {
     }
 
     pub fn read(path: &std::path::Path) -> std::io::Result<Self> {
+        let bytes = std::fs::read(path)?;
+        Self::parse_bytes(&bytes, path)
+    }
+
+    fn parse_bytes(bytes: &[u8], path: &std::path::Path) -> std::io::Result<Self> {
         use std::io::{Error, ErrorKind};
         let invalid =
             |why: &str| Error::new(ErrorKind::InvalidData, format!("{}: {why}", path.display()));
-        let bytes = std::fs::read(path)?;
         if bytes.len() < 28 {
             return Err(invalid("file size does not match header"));
         }
@@ -423,6 +616,166 @@ impl LibratusBucketTable {
             return Err(invalid("bucket ID is out of range"));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn libratus_manifest_rejects_modified_table() {
+    let dir = std::env::temp_dir().join(format!("libratus-manifest-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("table.bin");
+    let manifest_path = dir.join("manifest.json");
+    let deck = deck(7);
+    let river = RiverTable::build(&deck);
+    let turn = StreetFeatures::build(&deck, 4, 50, &river);
+    let mut hashes: Vec<u64> = turn.keys.iter().map(|&key| hash_key(key)).collect();
+    hashes.sort_unstable();
+    let bytes = LibratusBucketTable::new(2, 2, hashes, vec![0; turn.keys.len()])
+        .unwrap()
+        .serialize();
+    std::fs::write(&path, &bytes).unwrap();
+    let mut manifest = LibratusManifest::for_table(
+        &bytes,
+        2,
+        2,
+        turn.keys.len() as u64,
+        5651100,
+        7,
+        "test",
+        false,
+    );
+    manifest.initialization = "k50-weighted-sample-200000".into();
+    manifest.centroid = "mean".into();
+    manifest.restarts = 1;
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert!(LibratusBucketTable::read_verified(&path, &manifest_path).is_ok());
+    let mut corrupt = bytes;
+    let bucket_offset = corrupt.len() - 2;
+    corrupt[bucket_offset] = 1;
+    std::fs::write(&path, corrupt).unwrap();
+    assert!(LibratusBucketTable::read_verified(&path, &manifest_path).is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(test)]
+#[test]
+fn libratus_turn_cdf_matches_direct_showdowns() {
+    let deck = deck(5);
+    let board = [deck[0], deck[4], deck[8], deck[12]];
+    let hole = [deck[1], deck[5]];
+    let river = RiverTable::build(&deck);
+    let turn = StreetFeatures::build(&deck, 4, 50, &river);
+    let index = turn.keys.binary_search(&class_key(&hole, &board)).unwrap();
+    let mut counts = [0u32; 50];
+    let mut total = 0;
+    for &card in &deck {
+        if board.contains(&card) || hole.contains(&card) {
+            continue;
+        }
+        let mut complete = board.to_vec();
+        complete.push(card);
+        let mut hero_cards = vec![hole[0], hole[1]];
+        hero_cards.extend_from_slice(&complete);
+        let hero_value = evaluate(&hero_cards);
+        let opponents: Vec<u8> = deck
+            .iter()
+            .copied()
+            .filter(|c| !hole.contains(c) && !complete.contains(c))
+            .collect();
+        let mut wins = 0u32;
+        let mut ties = 0u32;
+        let mut hands = 0u32;
+        for opponent in combinations(&opponents, 2) {
+            let mut cards = opponent;
+            cards.extend_from_slice(&complete);
+            let value = evaluate(&cards);
+            wins += u32::from(hero_value > value);
+            ties += u32::from(hero_value == value);
+            hands += 1;
+        }
+        let equity = (wins as f32 + 0.5 * ties as f32) / hands as f32;
+        counts[((equity * 50.0) as usize).min(49)] += 1;
+        total += 1;
+    }
+    let mut running = 0;
+    for (actual, count) in turn.cdf[index * 50..(index + 1) * 50].iter().zip(counts) {
+        running += count;
+        assert_eq!(*actual, running as f32 / total as f32);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn libratus_cdf_mean_median_objectives_from_same_centers() {
+    let points = [0.0, 1.0, 0.2, 1.0, 0.9, 1.0, 1.0, 1.0];
+    let weights = [4, 1, 1, 3];
+    let initial = vec![0.0, 1.0, 1.0, 1.0];
+    let mut after_one = [0.0; 2];
+    let mut final_cost = [0.0; 2];
+    for (i, mode) in [CdfCentroidMode::Mean, CdfCentroidMode::LowerWeightedMedian]
+        .into_iter()
+        .enumerate()
+    {
+        for (steps, output) in [(1, &mut after_one[i]), (50, &mut final_cost[i])] {
+            let result =
+                kmeans_cdf_from_centroids(&points, 2, &weights, initial.clone(), steps, mode);
+            *output = points
+                .chunks_exact(2)
+                .zip(&weights)
+                .map(|(point, &w)| {
+                    result
+                        .centroids
+                        .chunks_exact(2)
+                        .map(|center| l1(point, center) as f64)
+                        .fold(f64::INFINITY, f64::min)
+                        * w as f64
+                })
+                .sum();
+        }
+    }
+    println!("after_one={after_one:?}, final={final_cost:?}");
+    assert!(after_one[1] <= after_one[0]);
+    assert!(final_cost[1] <= final_cost[0]);
+}
+
+#[cfg(test)]
+#[test]
+#[ignore = "сравнение полной CDF малого набора"]
+fn libratus_turn_mean_median_small_deck_objectives() {
+    let cards = deck(7);
+    let river = RiverTable::build(&cards);
+    let features = StreetFeatures::build(&cards, 4, 50, &river);
+    for mode in [CdfCentroidMode::Mean, CdfCentroidMode::LowerWeightedMedian] {
+        for iterations in [1, 50] {
+            let result = kmeans_cdf(
+                &features.cdf,
+                50,
+                &features.weight,
+                50,
+                2026112101,
+                iterations,
+                mode,
+            );
+            let cost: f64 = features
+                .cdf
+                .chunks_exact(50)
+                .zip(&features.weight)
+                .map(|(point, &weight)| {
+                    result
+                        .centroids
+                        .chunks_exact(50)
+                        .map(|center| l1(point, center) as f64)
+                        .fold(f64::INFINITY, f64::min)
+                        * weight as f64
+                })
+                .sum::<f64>()
+                / features.weight.iter().sum::<u64>() as f64;
+            println!(
+                "mode={mode:?} iterations={iterations} updates={} weighted_l1={cost:.12}",
+                result.objective.len()
+            );
+        }
     }
 }
 
@@ -1804,6 +2157,219 @@ pub fn kmeans(
 pub enum CdfCentroidMode {
     Mean,
     LowerWeightedMedian,
+}
+
+#[cfg(test)]
+#[test]
+fn libratus_l2_uses_every_weighted_point_and_first_tie() {
+    let points = [0.0, 0.0, 2.0, 0.0, 10.0, 0.0];
+    let result = libratus_l2_from_centroids(&points, 2, &[1, 3, 1], vec![0.0, 0.0, 10.0, 0.0], 5);
+    assert_eq!(result.assignment, vec![0, 0, 1]);
+    assert_eq!(result.centroids, vec![1.5, 0.0, 10.0, 0.0]);
+    let tied = libratus_l2_from_centroids(&[1.0], 1, &[1], vec![0.0, 2.0], 1);
+    assert_eq!(tied.assignment, vec![0]);
+}
+
+#[cfg(test)]
+#[test]
+fn libratus_l2_initial_center_respects_zero_weight() {
+    for seed in 0..32 {
+        let c = libratus_l2(&[0.0, 1.0], 1, &[0, 1], 1, seed, seed, 0);
+        assert_eq!(c.centroids, vec![1.0]);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn libratus_l2_large_sample_still_updates_from_all_points() {
+    let mut points = vec![0.0; 20_001];
+    points[20_000] = 100.0;
+    let mut weights = vec![1000; 20_001];
+    weights[20_000] = 1;
+    let a = libratus_l2(&points, 1, &weights, 1, 1, 2, 1);
+    let b = libratus_l2(&points, 1, &weights, 1, 1, 2, 1);
+    assert_eq!(a.assignment, b.assignment);
+    assert_eq!(a.centroids, b.centroids);
+    assert!((a.centroids[0] - 100.0 / 20_000_001.0).abs() < 1e-10);
+}
+
+#[cfg(test)]
+#[test]
+fn libratus_table_lookup_checks_street_and_class() {
+    let hole = [0, 5];
+    let board = [8, 13, 18, 23];
+    let hash = hash_key(class_key(&hole, &board));
+    let table = LibratusBucketTable::new(2, 50, vec![hash], vec![7]).unwrap();
+    assert_eq!(table.bucket(&hole, &board), Some(7));
+    assert_eq!(table.bucket(&hole, &board[..3]), None);
+    assert_eq!(table.bucket(&[1, 2], &board), None);
+}
+
+/// Взвешенная L2-кластеризация с ограниченной выборкой для инициализации.
+pub fn libratus_l2(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    k: usize,
+    sample_seed: u64,
+    seed: u64,
+    iterations: usize,
+) -> Clustering {
+    let n = weight.len();
+    assert!(n >= k && k > 0 && dim > 0 && points.len() == n * dim);
+    let mut rng = Rng(sample_seed);
+    let cumulative: Vec<u64> = weight
+        .iter()
+        .scan(0u64, |sum, &w| {
+            *sum += w;
+            Some(*sum)
+        })
+        .collect();
+    let total = *cumulative.last().unwrap();
+    assert!(total > 0);
+    let sample: Vec<usize> = if n <= 20_000 {
+        (0..n).collect()
+    } else {
+        (0..20_000)
+            .map(|_| {
+                let target = (rng.unit() * total as f64) as u64;
+                cumulative.partition_point(|&v| v <= target).min(n - 1)
+            })
+            .collect()
+    };
+    let sample_weight = |i: usize| if n <= 20_000 { weight[i] as f64 } else { 1.0 };
+    let mut rng = Rng(seed);
+    let mut centers = Vec::with_capacity(k * dim);
+    let sum: f64 = sample.iter().map(|&i| sample_weight(i)).sum();
+    let mut target = rng.unit() * sum;
+    let mut first = *sample.last().unwrap();
+    for &i in &sample {
+        target -= sample_weight(i);
+        if target < 0.0 {
+            first = i;
+            break;
+        }
+    }
+    centers.extend_from_slice(&points[first * dim..(first + 1) * dim]);
+    let mut nearest = vec![f64::INFINITY; sample.len()];
+    while centers.len() < k * dim {
+        let center = &centers[centers.len() - dim..];
+        for (distance, &i) in nearest.iter_mut().zip(&sample) {
+            let d = points[i * dim..(i + 1) * dim]
+                .iter()
+                .zip(center)
+                .map(|(&a, &b)| (a as f64 - b as f64).powi(2))
+                .sum::<f64>();
+            *distance = distance.min(d);
+        }
+        let sum: f64 = nearest
+            .iter()
+            .zip(&sample)
+            .map(|(&d, &i)| d * sample_weight(i))
+            .sum();
+        let mut target = rng.unit() * sum;
+        let mut chosen = sample[0];
+        for (&d, &i) in nearest.iter().zip(&sample) {
+            target -= d * sample_weight(i);
+            if target < 0.0 {
+                chosen = i;
+                break;
+            }
+        }
+        centers.extend_from_slice(&points[chosen * dim..(chosen + 1) * dim]);
+    }
+    libratus_l2_from_centroids(points, dim, weight, centers, iterations)
+}
+
+fn libratus_l2_from_centroids(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    mut centroids: Vec<f32>,
+    iterations: usize,
+) -> Clustering {
+    let n = weight.len();
+    let k = centroids.len() / dim;
+    let total: f64 = weight.iter().map(|&w| w as f64).sum();
+    let assign = |centers: &[f32]| -> Vec<(u16, f64)> {
+        (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let row = &points[i * dim..(i + 1) * dim];
+                let mut best = (0, f64::INFINITY);
+                for c in 0..k {
+                    let d = row
+                        .iter()
+                        .zip(&centers[c * dim..(c + 1) * dim])
+                        .map(|(&a, &b)| (a as f64 - b as f64).powi(2))
+                        .sum();
+                    if d < best.1 {
+                        best = (c as u16, d);
+                    }
+                }
+                best
+            })
+            .collect()
+    };
+    let mut assignment = vec![u16::MAX; n];
+    let mut objective = Vec::new();
+    for _ in 0..iterations {
+        let assigned = assign(&centroids);
+        let moved: u64 = assigned
+            .iter()
+            .zip(&assignment)
+            .zip(weight)
+            .filter(|((a, old), _)| a.0 != **old)
+            .map(|(_, &w)| w)
+            .sum();
+        objective.push(
+            assigned
+                .iter()
+                .zip(weight)
+                .map(|(a, &w)| a.1 * w as f64)
+                .sum::<f64>()
+                / total,
+        );
+        let mut mass = vec![0u64; k];
+        let mut sums = vec![0f64; k * dim];
+        for (i, &(c, _)) in assigned.iter().enumerate() {
+            let c = c as usize;
+            assignment[i] = c as u16;
+            mass[c] += weight[i];
+            for d in 0..dim {
+                sums[c * dim + d] += points[i * dim + d] as f64 * weight[i] as f64;
+            }
+        }
+        for c in 0..k {
+            if mass[c] > 0 {
+                for d in 0..dim {
+                    centroids[c * dim + d] = (sums[c * dim + d] / mass[c] as f64) as f32;
+                }
+            }
+        }
+        if (moved as f64) / total < 1e-4 {
+            break;
+        }
+    }
+    let final_assignment = assign(&centroids);
+    assignment = final_assignment.iter().map(|a| a.0).collect();
+    objective.push(
+        final_assignment
+            .iter()
+            .zip(weight)
+            .map(|(a, &w)| a.1 * w as f64)
+            .sum::<f64>()
+            / total,
+    );
+    Clustering {
+        assignment,
+        centroids,
+        objective,
+        diagnostics: Vec::new(),
+        final_assignment_diagnostic: None,
+        termination: None,
+        final_assignment_consistent: true,
+    }
 }
 
 /// Взвешенная кластеризация CDF с L1-расстоянием и детерминированным tie-break.
@@ -5903,12 +6469,6 @@ mod tests {
             );
             assert_eq!(clustering.centroids[2..4], [0.8, 1.0], "{mode:?}");
         }
-    }
-
-    #[test]
-    #[ignore = "needs Task 4 builder"]
-    fn libratus_kmeans_cdf_mean_k50_matches_equity_builder() {
-        panic!("running with --ignored must fail until Task 4 builds libratus-ochs turn tables for comparison with --abstraction equity");
     }
 
     #[test]
