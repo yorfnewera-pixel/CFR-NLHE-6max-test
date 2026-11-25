@@ -207,8 +207,27 @@ def test_libratus_requires_manifest():
 def test_libratus_manifest_type_validation_without_artifacts(field, value):
     from src.blueprint.equity_buckets import _validate_libratus_manifest_types
 
-    valid = {"working_tree_dirty": False, "seed": 0, "code_revision": "123"}
+    valid = {"working_tree_dirty": False, "seed": 0, "code_revision": "123",
+             "street": 2, "k": 50, "class_count": 2, "total_weight": 2,
+             "ranks": 7, "bins": 50, "restarts": 1, "max_iterations": 50}
     _validate_libratus_manifest_types(valid)
     valid[field] = value
+    with pytest.raises(ValueError):
+        _validate_libratus_manifest_types(valid)
+
+
+@pytest.mark.parametrize("field,bits", [
+    ("street", 32), ("k", 32), ("class_count", 64), ("total_weight", 64),
+    ("ranks", 8), ("bins", 32), ("seed", 64), ("restarts", 32), ("max_iterations", 32),
+])
+@pytest.mark.parametrize("bad", ["float", "boolean", "negative", "overflow"])
+def test_libratus_integer_types_match_rust_without_artifacts(field, bits, bad):
+    from src.blueprint.equity_buckets import _validate_libratus_manifest_types
+
+    valid = {"working_tree_dirty": False, "seed": 0, "code_revision": "123",
+             "street": 2, "k": 50, "class_count": 2, "total_weight": 2,
+             "ranks": 7, "bins": 50, "restarts": 1, "max_iterations": 50}
+    _validate_libratus_manifest_types(valid)
+    valid[field] = {"float": 7.0, "boolean": True, "negative": -1, "overflow": 2**bits}[bad]
     with pytest.raises(ValueError):
         _validate_libratus_manifest_types(valid)

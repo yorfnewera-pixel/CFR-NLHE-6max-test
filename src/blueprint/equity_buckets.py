@@ -70,9 +70,15 @@ class BucketTable:
 
 
 def _validate_libratus_manifest_types(manifest):
+    integer_bits = {
+        "street": 32, "k": 32, "class_count": 64, "total_weight": 64,
+        "ranks": 8, "bins": 32, "seed": 64, "restarts": 32, "max_iterations": 32,
+    }
+    for field, bits in integer_bits.items():
+        value = manifest.get(field)
+        if type(value) is not int or not 0 <= value < 2**bits:
+            raise ValueError(f"invalid manifest integer: {field}")
     if (type(manifest.get("working_tree_dirty")) is not bool
-            or type(manifest.get("seed")) is not int
-            or not 0 <= manifest["seed"] <= 2**64 - 1
             or not isinstance(manifest.get("code_revision"), str)
             or not manifest["code_revision"]):
         raise ValueError("invalid manifest field types")
