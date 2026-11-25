@@ -69,6 +69,15 @@ class BucketTable:
         return int(self.buckets[index])
 
 
+def _validate_libratus_manifest_types(manifest):
+    if (type(manifest.get("working_tree_dirty")) is not bool
+            or type(manifest.get("seed")) is not int
+            or not 0 <= manifest["seed"] <= 2**64 - 1
+            or not isinstance(manifest.get("code_revision"), str)
+            or not manifest["code_revision"]):
+        raise ValueError("invalid manifest field types")
+
+
 class LibratusBucketTable:
     """Строго валидируемая turn/river-таблица формата HU20LIB1."""
 
@@ -76,7 +85,12 @@ class LibratusBucketTable:
     VERSION = 1
     _STREETS = {2: "turn", 3: "river"}
 
-    def __init__(self, path, manifest_path=None):
+    def __init__(self, path, manifest_path):
+        if manifest_path is None:
+            raise ValueError("manifest is required")
+        self._load(path, manifest_path)
+
+    def _load(self, path, manifest_path):
         raw = Path(path).read_bytes()
         if len(raw) < 28:
             raise ValueError("file size does not match header")
@@ -105,6 +119,7 @@ class LibratusBucketTable:
             import json
 
             manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+            _validate_libratus_manifest_types(manifest)
             expected_fields = {"format", "street", "k", "class_count", "total_weight", "ranks", "code_revision", "working_tree_dirty", "table_sha256", "canonicalization", "context", "normalization", "feature", "bins", "distance", "centroid", "ochs_map_sha256", "empty_group_rule", "seed", "initialization", "restarts", "restart_selection", "max_iterations", "stop_rule", "tie_break"}
             if (manifest.get("format") != "HU20LIB1"
                     or set(manifest) != expected_fields
@@ -123,15 +138,17 @@ class LibratusBucketTable:
                     or manifest.get("empty_group_rule") != "uniform-equity-fill-v1"
                     or manifest.get("tie_break") != "first-minimum"
                     or manifest.get("stop_rule") != "moved-weight-fraction-lt-1e-4"
-                    or not manifest.get("total_weight") or not manifest.get("code_revision")
+                    or not manifest.get("total_weight")
                     or not manifest.get("restarts") or not manifest.get("max_iterations")):
                 raise ValueError("manifest does not match table")
             if manifest.get("ranks") != 7:
                 raise ValueError("unsupported deck in manifest")
             if (not 1 <= manifest["max_iterations"] <= 50
                     or (self.street == "turn" and (manifest["total_weight"] != 5651100
-                        or manifest["initialization"] != "k50-weighted-sample-200000"
-                        or manifest["restarts"] != 1 or manifest["centroid"] not in {"mean", "lower-weighted-median"}))
+                        or manifest["centroid"] not in {"mean", "lower-weighted-median"}
+                        or (manifest["initialization"], manifest["restarts"]) != (
+                            ("k50-weighted-sample-200000", 1) if self.k == 50 and manifest["centroid"] == "mean"
+                            else ("all-weighted-if-n-le-20000-else-weighted-20000-with-replacement", 3))))
                     or (self.street == "river" and (manifest["total_weight"] != 24864840
                         or manifest["initialization"] != "all-weighted-if-n-le-20000-else-weighted-20000-with-replacement"
                         or manifest["restarts"] != 3 or manifest["centroid"] != "weighted-mean"))):

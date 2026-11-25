@@ -497,9 +497,15 @@ impl LibratusBucketTable {
         if manifest.max_iterations > 50
             || (table.street == 2
                 && (manifest.total_weight != 5651100
-                    || manifest.initialization != "k50-weighted-sample-200000"
-                    || manifest.restarts != 1
-                    || !matches!(manifest.centroid.as_str(), "mean" | "lower-weighted-median")))
+                    || !matches!(manifest.centroid.as_str(), "mean" | "lower-weighted-median")
+                    || if table.k == 50 && manifest.centroid == "mean" {
+                        manifest.initialization != "k50-weighted-sample-200000"
+                            || manifest.restarts != 1
+                    } else {
+                        manifest.initialization
+                            != "all-weighted-if-n-le-20000-else-weighted-20000-with-replacement"
+                            || manifest.restarts != 3
+                    }))
             || (table.street == 3
                 && (manifest.total_weight != 24864840
                     || manifest.initialization
@@ -557,7 +563,8 @@ impl LibratusBucketTable {
         out
     }
 
-    pub fn read(path: &std::path::Path) -> std::io::Result<Self> {
+    #[cfg(test)]
+    fn read(path: &std::path::Path) -> std::io::Result<Self> {
         let bytes = std::fs::read(path)?;
         Self::parse_bytes(&bytes, path)
     }
@@ -645,11 +652,24 @@ fn libratus_manifest_rejects_modified_table() {
         "test",
         false,
     );
-    manifest.initialization = "k50-weighted-sample-200000".into();
     manifest.centroid = "mean".into();
-    manifest.restarts = 1;
     std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
     assert!(LibratusBucketTable::read_verified(&path, &manifest_path).is_ok());
+    for (field, value) in [
+        ("working_tree_dirty", serde_json::json!("false")),
+        ("seed", serde_json::json!(-1)),
+        ("code_revision", serde_json::json!(123)),
+    ] {
+        let mut altered = serde_json::to_value(&manifest).unwrap();
+        altered[field] = value;
+        std::fs::write(&manifest_path, serde_json::to_vec(&altered).unwrap()).unwrap();
+        assert!(
+            LibratusBucketTable::read_verified(&path, &manifest_path).is_err(),
+            "{field}"
+        );
+    }
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert!(LibratusBucketTable::read_verified(&path, &dir.join("missing.json")).is_err());
     let mut corrupt = bytes;
     let bucket_offset = corrupt.len() - 2;
     corrupt[bucket_offset] = 1;
@@ -2279,6 +2299,127 @@ pub fn libratus_l2(
         centers.extend_from_slice(&points[chosen * dim..(chosen + 1) * dim]);
     }
     libratus_l2_from_centroids(points, dim, weight, centers, iterations)
+}
+
+/// Выбирает лучший из трёх запусков по полной взвешенной L1-ошибке.
+pub fn libratus_cdf(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    k: usize,
+    seed: u64,
+    iterations: usize,
+    mode: CdfCentroidMode,
+) -> Clustering {
+    let mut best: Option<Clustering> = None;
+    for restart in 0..3 {
+        let candidate = libratus_cdf_restart(
+            points,
+            dim,
+            weight,
+            k,
+            seed,
+            seed.wrapping_add(restart),
+            iterations,
+            mode,
+        );
+        if best.as_ref().map_or(true, |previous| {
+            candidate.objective.last().unwrap() < previous.objective.last().unwrap()
+        }) {
+            best = Some(candidate);
+        }
+    }
+    best.unwrap()
+}
+
+fn libratus_cdf_restart(
+    points: &[f32],
+    dim: usize,
+    weight: &[u64],
+    k: usize,
+    sample_seed: u64,
+    seed: u64,
+    iterations: usize,
+    mode: CdfCentroidMode,
+) -> Clustering {
+    let n = weight.len();
+    assert!(n >= k && k > 0 && dim > 0 && points.len() == n * dim);
+    let mut rng = Rng(sample_seed);
+    let cumulative: Vec<u64> = weight
+        .iter()
+        .scan(0u64, |sum, &w| {
+            *sum += w;
+            Some(*sum)
+        })
+        .collect();
+    let total = *cumulative.last().unwrap();
+    assert!(total > 0);
+    let sample: Vec<usize> = if n <= 20_000 {
+        (0..n).collect()
+    } else {
+        (0..20_000)
+            .map(|_| {
+                let target = (rng.unit() * total as f64) as u64;
+                cumulative.partition_point(|&v| v <= target).min(n - 1)
+            })
+            .collect()
+    };
+    let sample_weight = |i: usize| if n <= 20_000 { weight[i] as f64 } else { 1.0 };
+    let mut rng = Rng(seed);
+    let mut centers = Vec::with_capacity(k * dim);
+    let sum: f64 = sample.iter().map(|&i| sample_weight(i)).sum();
+    let mut target = rng.unit() * sum;
+    let mut first = *sample.last().unwrap();
+    for &i in &sample {
+        target -= sample_weight(i);
+        if target < 0.0 {
+            first = i;
+            break;
+        }
+    }
+    centers.extend_from_slice(&points[first * dim..(first + 1) * dim]);
+    let mut nearest = vec![f64::INFINITY; sample.len()];
+    while centers.len() < k * dim {
+        let center = &centers[centers.len() - dim..];
+        for (distance, &i) in nearest.iter_mut().zip(&sample) {
+            let d = points[i * dim..(i + 1) * dim]
+                .iter()
+                .zip(center)
+                .map(|(&a, &b)| (a as f64 - b as f64).abs())
+                .sum::<f64>();
+            *distance = distance.min(d);
+        }
+        let sum: f64 = nearest
+            .iter()
+            .zip(&sample)
+            .map(|(&d, &i)| d * sample_weight(i))
+            .sum();
+        let mut target = rng.unit() * sum;
+        let mut chosen = sample[0];
+        for (&d, &i) in nearest.iter().zip(&sample) {
+            target -= d * sample_weight(i);
+            if target < 0.0 {
+                chosen = i;
+                break;
+            }
+        }
+        centers.extend_from_slice(&points[chosen * dim..(chosen + 1) * dim]);
+    }
+    let mut result = kmeans_cdf_from_centroids(points, dim, weight, centers, iterations, mode);
+    let error = result
+        .assignment
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| {
+            l1(
+                &points[i * dim..(i + 1) * dim],
+                &result.centroids[c as usize * dim..(c as usize + 1) * dim],
+            ) as f64
+                * weight[i] as f64
+        })
+        .sum::<f64>();
+    result.objective.push(error);
+    result
 }
 
 fn libratus_l2_from_centroids(
@@ -9704,5 +9845,43 @@ mod tests {
         assert_eq!((table.street, table.k), (2, 50));
         assert_eq!(table.bucket(&[48, 44], &[0, 21, 30, 39]), Some(3));
         assert_eq!(table.bucket(&[48, 46], &[0, 21, 30, 39]), Some(7));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn libratus_cdf_restarts_select_minimum_on_full_weighted_set() {
+    for n in [20_000, 20_001] {
+        let points: Vec<f32> = (0..n).map(|i| (i % 17) as f32 / 17.0).collect();
+        let weights: Vec<u64> = (0..n).map(|i| if i == n - 1 { 1000 } else { 1 }).collect();
+        for mode in [CdfCentroidMode::Mean, CdfCentroidMode::LowerWeightedMedian] {
+            let result = libratus_cdf(&points, 1, &weights, 3, 42, 3, mode);
+            let repeated = libratus_cdf(&points, 1, &weights, 3, 42, 3, mode);
+            assert_eq!(result.assignment, repeated.assignment);
+            let candidates: Vec<_> = (0..3)
+                .map(|restart| {
+                    libratus_cdf_restart(&points, 1, &weights, 3, 42, 42 + restart, 3, mode)
+                })
+                .collect();
+            let minimum = candidates
+                .iter()
+                .map(|c| *c.objective.last().unwrap())
+                .fold(f64::INFINITY, f64::min);
+            assert_eq!(*result.objective.last().unwrap(), minimum);
+            let direct: f64 = result
+                .assignment
+                .iter()
+                .enumerate()
+                .map(|(i, &c)| {
+                    (points[i] - result.centroids[c as usize]).abs() as f64 * weights[i] as f64
+                })
+                .sum();
+            assert_eq!(*result.objective.last().unwrap(), direct);
+            let first_best = candidates
+                .iter()
+                .find(|c| *c.objective.last().unwrap() == minimum)
+                .unwrap();
+            assert_eq!(result.assignment, first_best.assignment);
+        }
     }
 }

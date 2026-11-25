@@ -33,7 +33,9 @@ def _libratus_table(path):
     # Импорт внутри helper сохраняет RED-доказательство на родительском commit:
     # pytest собирает тесты, но новый читатель там ещё отсутствует.
     from src.blueprint.equity_buckets import LibratusBucketTable
-    return LibratusBucketTable(path)
+    table = LibratusBucketTable.__new__(LibratusBucketTable)
+    table._load(path, None)
+    return table
 
 
 def _write_libratus_fixture(path, raw=LIBRATUS_FIXTURE):
@@ -69,7 +71,7 @@ def test_libratus_round_trip_fixture_and_suit_isomorphism(tmp_path):
 def test_libratus_rejects_invalid_format(tmp_path, name, mutate):
     raw = bytearray(LIBRATUS_FIXTURE)
     mutate(raw)
-    path = _write_libratus_fixture(tmp_path / f"{name}.bin", raw)
+    path = _write_libratus_fixture(tmp_path / f"{name}.bin", bytes(raw))
 
     with pytest.raises(ValueError):
         _libratus_table(path)
@@ -162,3 +164,51 @@ def test_libratus_manifest_rejects_table_digest_mismatch(tmp_path):
     manifest.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="manifest"):
         LibratusBucketTable(table, manifest)
+
+@pytest.mark.parametrize("field,value", [
+    ("working_tree_dirty", "false"),
+    ("seed", -1),
+    ("code_revision", 123),
+])
+def test_libratus_manifest_rejects_invalid_json_types(tmp_path, field, value):
+    import json
+    from src.blueprint.equity_buckets import LibratusBucketTable
+
+    root = Path("results/libratus-pr-b/release1")
+    table = root / "libratus-turn-k50.bin"
+    manifest = root / "libratus-turn-k50.json"
+    if not table.exists() or not manifest.exists():
+        pytest.skip("нужны малые таблицы PR B")
+    metadata = json.loads(manifest.read_text(encoding="utf-8"))
+    metadata[field] = value
+    altered = tmp_path / "manifest.json"
+    altered.write_text(json.dumps(metadata), encoding="utf-8")
+    with pytest.raises(ValueError):
+        LibratusBucketTable(table, altered)
+
+
+def test_libratus_requires_manifest():
+    from src.blueprint.equity_buckets import LibratusBucketTable
+
+    table = Path("results/libratus-pr-b/release1/libratus-turn-k50.bin")
+    if not table.exists():
+        pytest.skip("нужна малая таблица PR B")
+    with pytest.raises((TypeError, ValueError)):
+        LibratusBucketTable(table)  # type: ignore[call-arg]
+    with pytest.raises((TypeError, ValueError)):
+        LibratusBucketTable(table, None)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("working_tree_dirty", "false"),
+    ("seed", -1),
+    ("code_revision", 123),
+])
+def test_libratus_manifest_type_validation_without_artifacts(field, value):
+    from src.blueprint.equity_buckets import _validate_libratus_manifest_types
+
+    valid = {"working_tree_dirty": False, "seed": 0, "code_revision": "123"}
+    _validate_libratus_manifest_types(valid)
+    valid[field] = value
+    with pytest.raises(ValueError):
+        _validate_libratus_manifest_types(valid)

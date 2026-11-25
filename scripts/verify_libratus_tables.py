@@ -28,7 +28,7 @@ def check(executable, table, manifest):
     with tempfile.TemporaryDirectory() as temporary:
         broken = Path(temporary) / "broken.bin"
         bad_manifest = Path(temporary) / "manifest.json"
-        for case in ("magic", "bucket", "manifest", "missing-class"):
+        for case in ("magic", "bucket", "manifest", "missing-class", "dirty-type", "negative-seed", "revision-type", "missing-manifest"):
             data = bytearray(raw)
             altered = dict(metadata)
             if case == "magic":
@@ -41,17 +41,24 @@ def check(executable, table, manifest):
                 struct.pack_into("<Q", data, 20, count - 1)
                 altered["class_count"] = count - 1
                 altered["table_sha256"] = hashlib.sha256(data).hexdigest()
-            else:
+            elif case == "dirty-type":
+                altered["working_tree_dirty"] = "false"
+            elif case == "negative-seed":
+                altered["seed"] = -1
+            elif case == "revision-type":
+                altered["code_revision"] = 123
+            elif case == "manifest":
                 altered["street"] = 5 - metadata["street"]
             broken.write_bytes(data)
             bad_manifest.write_text(json.dumps(altered), encoding="utf-8")
+            selected_manifest = Path(temporary) / "absent.json" if case == "missing-manifest" else bad_manifest
             try:
-                LibratusBucketTable(broken, bad_manifest)
-            except (ValueError, KeyError):
+                LibratusBucketTable(broken, selected_manifest)
+            except (ValueError, KeyError, OSError):
                 pass
             else:
                 raise AssertionError(f"Python принял повреждение {case}")
-            if verify_rust(executable, broken, bad_manifest).returncode == 0:
+            if verify_rust(executable, broken, selected_manifest).returncode == 0:
                 raise AssertionError(f"Rust принял повреждение {case}")
     print(f"{table.name}: {len(parsed.buckets)} ID, SHA-256 {digest}; повреждения отклонены")
 

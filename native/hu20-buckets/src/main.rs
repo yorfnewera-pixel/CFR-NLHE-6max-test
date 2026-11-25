@@ -132,10 +132,10 @@ fn build_libratus(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "turn k={k}, elapsed={:.1}s",
             started.elapsed().as_secs_f64()
         );
-        let turn_result = if mode == CdfCentroidMode::Mean {
+        let turn_result = if k == 50 && mode == CdfCentroidMode::Mean {
             kmeans(&turn.cdf, bins, &turn.weight, k, seed, iterations)
         } else {
-            kmeans_cdf(&turn.cdf, bins, &turn.weight, k, seed, iterations, mode)
+            libratus_cdf(&turn.cdf, bins, &turn.weight, k, seed, iterations, mode)
         };
         emit_libratus_table(
             &out,
@@ -240,8 +240,10 @@ fn emit_libratus_table(
     manifest.max_iterations = iterations as u32;
     if street == 2 {
         manifest.centroid = centroid.into();
-        manifest.initialization = "k50-weighted-sample-200000".into();
-        manifest.restarts = 1;
+        if k == 50 && centroid == "mean" {
+            manifest.initialization = "k50-weighted-sample-200000".into();
+            manifest.restarts = 1;
+        }
     }
     atomic_write(&table_path, &bytes)?;
     atomic_write(&manifest_path, &serde_json::to_vec_pretty(&manifest)?)?;
