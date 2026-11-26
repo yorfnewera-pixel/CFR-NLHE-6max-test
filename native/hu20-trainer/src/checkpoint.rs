@@ -1,5 +1,5 @@
 //! Streaming checkpoint validation shared by recovery and inference export.
-use crate::cards::{Cards, EQUITY_DESCRIPTOR, V1_DESCRIPTOR};
+use crate::cards::{Cards, EQUITY_DESCRIPTOR, V1_DESCRIPTOR, LIBRATUS_DESCRIPTOR, LIBRATUS_CANONICALIZATION, LIBRATUS_OCHS_SHA256};
 use crate::cfr::{AverageRule, Node};
 use crate::game::Game;
 use crate::key::MenuVersion;
@@ -32,6 +32,16 @@ pub fn header_cards(h: &Value) -> Result<(&'static str, Option<Value>), String> 
                 return Err("invalid equity table identity".into());
             }
             Ok((EQUITY_DESCRIPTOR, Some(tables.clone())))
+        }
+        Some(LIBRATUS_DESCRIPTOR) => {
+            let tables = &h["identity"]["card_tables"];
+            if tables.as_object().map_or(true, |t| t.len() != 4)
+                || !["turn", "river"].iter().all(|s| hex(&tables[*s]))
+                || tables["ochs_map_sha256"] != LIBRATUS_OCHS_SHA256
+                || tables["canonicalization"] != LIBRATUS_CANONICALIZATION {
+                return Err("invalid Libratus table identity".into());
+            }
+            Ok((LIBRATUS_DESCRIPTOR, Some(tables.clone())))
         }
         _ => Err("unsupported card descriptor".into()),
     }
@@ -68,7 +78,13 @@ pub fn header_game(h: &Value) -> Result<Game, String> {
     };
     let (descriptor, tables) = header_cards(h)?;
     let menu = header_menu(h, game)?;
-    let schema = crate::key::schema(game, tables.is_some(), menu);
+    let card_schema = match descriptor {
+        V1_DESCRIPTOR => crate::key::CardSchema::V1,
+        EQUITY_DESCRIPTOR => crate::key::CardSchema::Equity,
+        LIBRATUS_DESCRIPTOR => crate::key::CardSchema::Libratus,
+        _ => return Err("unsupported card descriptor".into()),
+    };
+    let schema = crate::key::try_schema(game, card_schema, menu).ok_or("unsupported game, card schema and menu")?;
     let identity = identity(game, descriptor, tables, menu);
     let ids = h["table"]["player_ids"].as_array().ok_or("invalid table players")?;
     let config = &h["config"];
@@ -195,6 +211,91 @@ mod tests {
     use super::*;
     use crate::cfr::Forced;
     use crate::game::{Action, Hand, Kind};
+
+    #[test]
+    fn libratus_checkpoint_roundtrip_without_training() {
+        use crate::cards::LibratusTables;
+        use hu20_buckets::LibratusBucketTable;
+        let tables = [
+            LibratusBucketTable::new(2, 2, vec![1], vec![0]).unwrap(),
+            LibratusBucketTable::new(3, 2, vec![1], vec![1]).unwrap(),
+        ];
+        let cards = Cards::Libratus(LibratusTables::fixture(tables, ["a".repeat(64), "b".repeat(64)]));
+        let mut trainer = Trainer::new(1, 1);
+        trainer.cards = cards;
+        let mut node = Node::empty(crate::key::code_of(&["check"]), 1);
+        node.regrets[0] = 1.25;
+        node.average[0] = 2.5;
+        assert!(trainer.table.insert([7; 16], node));
+        let path = std::env::temp_dir().join(format!("hu20-libratus-empty-{}.gz", std::process::id()));
+        trainer.save_recoverable(&path, 100, 100).unwrap();
+        let loaded = load(&path, Game::Hu20, cards, MenuVersion::V1, None, 100).unwrap();
+        assert_eq!(loaded.iteration, 0);
+        assert_eq!(loaded.nodes, 0);
+        assert_eq!(loaded.table.len(), 1);
+        let restored = loaded.table.get(&[7; 16]).unwrap();
+        assert_eq!(restored.regrets[0], 1.25);
+        assert_eq!(restored.average[0], 2.5);
+        assert!(load(&path, Game::Hu20, Cards::V1, MenuVersion::V1, None, 100).is_err());
+        assert!(load(&path, Game::Hu100, cards, MenuVersion::V1, None, 100).is_err());
+        assert!(load(&path, Game::Hu20, cards, MenuVersion::V2, None, 100).is_err());
+        for hashes in [["c".repeat(64), "b".repeat(64)], ["a".repeat(64), "c".repeat(64)]] {
+            let changed_tables = [LibratusBucketTable::new(2, 2, vec![1], vec![0]).unwrap(),
+                                  LibratusBucketTable::new(3, 2, vec![1], vec![1]).unwrap()];
+            let changed_cards = Cards::Libratus(LibratusTables::fixture(changed_tables, hashes));
+            assert!(load(&path, Game::Hu20, changed_cards, MenuVersion::V1, None, 100).is_err());
+        }
+        let output = path.with_extension("policy.gz");
+        assert_eq!(crate::export::export(&path, Some(&output), None, crate::export::ZeroMass::Uniform).unwrap(), 1);
+        let policy: Value = serde_json::from_reader(GzDecoder::new(std::fs::File::open(&output).unwrap())).unwrap();
+        assert_eq!(policy["abstraction"], "hu20-native-reopening-ordered-history-libratus-v1");
+        assert_eq!(policy["identity"], identity(Game::Hu20, LIBRATUS_DESCRIPTOR, cards.tables(), MenuVersion::V1));
+        let mut changed = policy.clone();
+        changed["identity"]["card_tables"]["ochs_map_sha256"] = json!("0".repeat(64));
+        assert!(header_cards(&changed).is_err());
+        changed = policy;
+        changed["identity"]["card_tables"]["canonicalization"] = json!("unknown");
+        assert!(header_cards(&changed).is_err());
+        std::fs::remove_file(output).unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn libratus_отклоняет_неквалифицированную_полную_колоду() {
+        use hu20_buckets::{LibratusBucketTable, LibratusManifest};
+        let dir = std::env::temp_dir().join(format!("hu20-libratus-full-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let table_path = dir.join("table.bin");
+        let manifest_path = dir.join("manifest.json");
+        let bytes = LibratusBucketTable::new(2, 2, vec![1], vec![0]).unwrap().serialize();
+        let manifest = LibratusManifest::for_table(&bytes, 2, 2, 1, 1, 13, "test", false);
+        std::fs::write(&table_path, bytes).unwrap();
+        std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let error = LibratusBucketTable::read_verified(&table_path, &manifest_path).err().unwrap();
+        assert!(error.to_string().contains("unsupported deck"));
+        std::fs::remove_file(table_path).unwrap();
+        std::fs::remove_file(manifest_path).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn проверка_контрольного_k50_checkpoint() {
+        let path = std::env::var("HU20_CONTROL_CHECKPOINT").expect("не задан контрольный checkpoint");
+        let source = BufReader::new(GzDecoder::new(std::fs::File::open(path).unwrap()));
+        let mut lines = source.lines();
+        let header: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+        assert_eq!(header_game(&header).unwrap(), Game::Hu20);
+        assert_eq!(header_menu(&header, Game::Hu20).unwrap(), MenuVersion::V1);
+        assert_eq!(header_cards(&header).unwrap().0, EQUITY_DESCRIPTOR);
+        let mut count = 0;
+        for line in lines {
+            let row: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            row_node(&row).unwrap();
+            count += 1;
+        }
+        assert_eq!(count, 8_303_507);
+    }
 
     fn river(game: Game) -> Hand {
         let mut hand = Hand::new_for(game, 0, [[48, 49], [44, 45]], [0, 5, 10, 15, 20]);

@@ -247,7 +247,7 @@ impl Trainer {
     }
 
     pub fn schema(&self) -> &'static str {
-        crate::key::schema(self.game, matches!(self.cards, Cards::Equity(_)), self.menu)
+        crate::key::schema(self.game, self.cards.key_schema(), self.menu)
     }
 
     /// `node` with its regrets brought to the current iteration's discount. Reads never write the

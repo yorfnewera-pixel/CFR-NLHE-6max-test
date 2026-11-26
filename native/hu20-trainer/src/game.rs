@@ -235,7 +235,7 @@ impl Hand {
 
 impl Core {
     pub fn schema(&self) -> &'static str {
-        crate::key::schema(self.game, matches!(self.cards, Cards::Equity(_)), self.menu)
+        crate::key::schema(self.game, self.cards.key_schema(), self.menu)
     }
 
     pub fn finished(&self) -> bool {

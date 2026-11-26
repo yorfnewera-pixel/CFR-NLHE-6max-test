@@ -222,7 +222,9 @@ def load_cards(schema, identity, directory):
 
     Never consult the legacy registration used by key/parity fixture builders.
     """
-    from src.blueprint.abstraction import EQUITY_SCHEMAS
+    from src.blueprint.abstraction import EQUITY_SCHEMAS, HU20_LIBRATUS_SCHEMA
+    if schema == HU20_LIBRATUS_SCHEMA:
+        raise ValueError("Схема Libratus не поддерживается загрузчиком таблиц K50")
     if schema not in EQUITY_SCHEMAS:
         if directory is not None:
             raise ValueError("Card bucket tables require a K50 schema")

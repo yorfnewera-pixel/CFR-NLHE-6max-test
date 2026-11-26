@@ -41,17 +41,30 @@ impl MenuVersion {
 }
 
 /// The key schema for a game, card descriptor and menu.
-pub fn schema(game: Game, equity: bool, menu: MenuVersion) -> &'static str {
-    match (menu, equity, game) {
-        (MenuVersion::V1, false, game) => game.schema(),
-        (MenuVersion::V1, true, game) => crate::cards::equity_schema(game),
-        (MenuVersion::V2, false, Game::Hu20) => "hu20-native-reopening-ordered-history-card-menu-v2",
-        (MenuVersion::V2, false, Game::Hu100) => "hu100-native-reopening-ordered-history-card-menu-v2",
-        (MenuVersion::V2, false, Game::Hu200) => "hu200-native-reopening-ordered-history-card-menu-v2",
-        (MenuVersion::V2, true, Game::Hu20) => "hu20-native-reopening-ordered-history-equity-k50-menu-v2",
-        (MenuVersion::V2, true, Game::Hu100) => "hu100-native-reopening-ordered-history-equity-k50-menu-v2",
-        (MenuVersion::V2, true, Game::Hu200) => "hu200-native-reopening-ordered-history-equity-k50-menu-v2",
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CardSchema {
+    V1,
+    Equity,
+    Libratus,
+}
+
+pub fn try_schema(game: Game, cards: CardSchema, menu: MenuVersion) -> Option<&'static str> {
+    Some(match (menu, cards, game) {
+        (MenuVersion::V1, CardSchema::V1, game) => game.schema(),
+        (MenuVersion::V1, CardSchema::Equity, game) => crate::cards::equity_schema(game),
+        (MenuVersion::V1, CardSchema::Libratus, Game::Hu20) => "hu20-native-reopening-ordered-history-libratus-v1",
+        (MenuVersion::V2, CardSchema::V1, Game::Hu20) => "hu20-native-reopening-ordered-history-card-menu-v2",
+        (MenuVersion::V2, CardSchema::V1, Game::Hu100) => "hu100-native-reopening-ordered-history-card-menu-v2",
+        (MenuVersion::V2, CardSchema::V1, Game::Hu200) => "hu200-native-reopening-ordered-history-card-menu-v2",
+        (MenuVersion::V2, CardSchema::Equity, Game::Hu20) => "hu20-native-reopening-ordered-history-equity-k50-menu-v2",
+        (MenuVersion::V2, CardSchema::Equity, Game::Hu100) => "hu100-native-reopening-ordered-history-equity-k50-menu-v2",
+        (MenuVersion::V2, CardSchema::Equity, Game::Hu200) => "hu200-native-reopening-ordered-history-equity-k50-menu-v2",
+        _ => return None,
+    })
+}
+
+pub fn schema(game: Game, cards: CardSchema, menu: MenuVersion) -> &'static str {
+    try_schema(game, cards, menu).expect("unsupported game, card schema and menu")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,6 +213,10 @@ fn push_bool(out: &mut Vec<u8>, value: bool) {
     out.extend_from_slice(if value { b"true" } else { b"false" });
 }
 
+fn libratus_flop(hole: [u8; 2], board: &[u8]) -> String {
+    format!("[\"flop\",{}]", hu20_buckets::class_key(&hole, board))
+}
+
 /// The JSON payload Python hashes, with `json.dumps(..., separators=(",", ":"))` formatting.
 pub fn write_payload(out: &mut Vec<u8>, hand: &Hand, menu: &[Choice]) {
     let a = hand.actor.expect("a key needs a live decision") as usize;
@@ -218,6 +235,13 @@ pub fn write_payload(out: &mut Vec<u8>, hand: &Hand, menu: &[Choice]) {
             Cards::V1 => push_postflop(out, hand.holes[a], hand.visible_board()),
             Cards::Equity(tables) => {
                 out.extend_from_slice(tables.bucket(hand.holes[a], hand.visible_board()).to_string().as_bytes())
+            }
+            Cards::Libratus(tables) => {
+                if hand.street == Street::Flop {
+                    out.extend_from_slice(libratus_flop(hand.holes[a], hand.visible_board()).as_bytes());
+                } else {
+                    out.extend_from_slice(tables.bucket(hand.holes[a], hand.visible_board()).to_string().as_bytes());
+                }
             }
         }
     }
@@ -277,4 +301,57 @@ pub fn digest16(bytes: &[u8]) -> [u8; 16] {
 
 pub fn key_hex(hand: &Hand, menu: &[Choice]) -> String {
     key_bytes(hand, menu).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod libratus_schema_tests {
+    use super::*;
+
+    #[test]
+    fn новая_схема_допускает_только_hu20_v1() {
+        assert_eq!(try_schema(Game::Hu20, CardSchema::Libratus, MenuVersion::V1),
+            Some("hu20-native-reopening-ordered-history-libratus-v1"));
+        assert_eq!(try_schema(Game::Hu100, CardSchema::Libratus, MenuVersion::V1), None);
+        assert_eq!(try_schema(Game::Hu200, CardSchema::Libratus, MenuVersion::V1), None);
+        assert_eq!(try_schema(Game::Hu20, CardSchema::Libratus, MenuVersion::V2), None);
+    }
+
+    #[test]
+    fn флоп_сохраняет_полный_канонический_класс() {
+        let a = libratus_flop([0, 5], &[10, 15, 20]);
+        assert_eq!(a, libratus_flop([5, 0], &[20, 10, 15]));
+        assert_ne!(a, libratus_flop([0, 5], &[10, 15, 24]));
+        assert_eq!(a, format!("[\"flop\",{}]", hu20_buckets::class_key(&[0, 5], &[10, 15, 20])));
+        assert_eq!(a, "[\"flop\",4951760194179124435628326916]");
+    }
+
+    #[test]
+    fn ключ_флопа_содержит_точный_класс() {
+        use crate::cards::LibratusTables;
+        use crate::game::{Action, Kind};
+        use hu20_buckets::LibratusBucketTable;
+        let mut hand = Hand::from_deck_for(Game::Hu20, 0, &(0..52).collect::<Vec<_>>());
+        let tables = std::array::from_fn(|i| {
+            let board = &hand.board[..i + 4];
+            let mut hashes: Vec<_> = hand.holes.iter().map(|hole| hu20_buckets::hash_key(hu20_buckets::class_key(hole, board))).collect();
+            hashes.sort_unstable();
+            hashes.dedup();
+            let assignments = vec![0; hashes.len()];
+            LibratusBucketTable::new(i as u32 + 2, 2, hashes, assignments).unwrap()
+        });
+        let tables = LibratusTables::fixture(tables, ["a".repeat(64), "b".repeat(64)]);
+        hand.core.cards = Cards::Libratus(tables);
+        let expected = ["3a2e2576b354d4b7e06966379d968b7c", "8a5cee923c9b932044194acad102f1d4",
+                        "b9ead3bbc5804ab562074726285383cf", "abd7d303ed40aee625561a3771264876"];
+        for (street, expected_key) in expected.iter().enumerate() {
+            let choices = menu(&hand);
+            let payload = payload(&hand, choices.as_slice());
+            if street == 1 { assert!(payload.contains("[\"flop\",")); }
+            assert_eq!(key_hex(&hand, choices.as_slice()), *expected_key);
+            if street < 3 {
+                hand.apply_mut(Action { kind: if street == 0 { Kind::Call } else { Kind::Check }, raise_to: 0 });
+                hand.apply_mut(Action { kind: Kind::Check, raise_to: 0 });
+            }
+        }
+    }
 }

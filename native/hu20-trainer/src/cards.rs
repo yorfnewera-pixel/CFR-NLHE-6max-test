@@ -6,13 +6,16 @@
 //! whose SHA256 differs from #163's build.
 
 use crate::game::Game;
-use hu20_buckets::{class_key, hash_key, BucketTable};
+use hu20_buckets::{class_key, hash_key, BucketTable, LibratusBucketTable};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::path::Path;
 
 pub const V1_DESCRIPTOR: &str = "legacy-postflop-descriptor-v1";
 pub const EQUITY_DESCRIPTOR: &str = "equity-histogram-k50-v1";
+pub const LIBRATUS_DESCRIPTOR: &str = "exact-flop-turn-cdf-river-ochs-v1";
+pub const LIBRATUS_CANONICALIZATION: &str = "hole-current-board-suit-isomorphism-v1";
+pub const LIBRATUS_OCHS_SHA256: &str = "6483f50df6ebd7e51d37353be6040f1c1bfd800907f870991576ae31c8f0a335";
 const STREETS: [&str; 3] = ["flop", "turn", "river"];
 /// #163's K=50 tables (`docs/reports/hu20-equity-buckets.md`), validated by #190.
 pub const EQUITY_K50_SHA256: [&str; 3] = [
@@ -25,6 +28,23 @@ pub const EQUITY_K50_SHA256: [&str; 3] = [
 pub struct EquityTables {
     tables: [BucketTable; 3],
     pub sha256: [String; 3],
+}
+
+pub struct LibratusTables {
+    tables: [LibratusBucketTable; 2],
+    sha256: [String; 2],
+}
+
+impl LibratusTables {
+    #[cfg(test)]
+    pub(crate) fn fixture(tables: [LibratusBucketTable; 2], sha256: [String; 2]) -> &'static Self {
+        Box::leak(Box::new(Self { tables, sha256 }))
+    }
+
+    pub fn bucket(&self, hole: [u8; 2], board: &[u8]) -> u16 {
+        let index = board.len().checked_sub(4).filter(|&i| i < 2).expect("invalid Libratus street");
+        self.tables[index].bucket(&hole, board).expect("situation missing from Libratus table")
+    }
 }
 
 thread_local! {
@@ -92,6 +112,7 @@ pub fn equity_schema(game: Game) -> &'static str {
 pub enum Cards {
     V1,
     Equity(&'static EquityTables),
+    Libratus(&'static LibratusTables),
 }
 
 impl std::fmt::Debug for Cards {
@@ -101,10 +122,19 @@ impl std::fmt::Debug for Cards {
 }
 
 impl Cards {
+    pub fn key_schema(self) -> crate::key::CardSchema {
+        match self {
+            Cards::V1 => crate::key::CardSchema::V1,
+            Cards::Equity(_) => crate::key::CardSchema::Equity,
+            Cards::Libratus(_) => crate::key::CardSchema::Libratus,
+        }
+    }
+
     pub fn schema(self, game: Game) -> &'static str {
         match self {
             Cards::V1 => game.schema(),
             Cards::Equity(_) => equity_schema(game),
+            Cards::Libratus(_) => crate::key::schema(game, crate::key::CardSchema::Libratus, crate::key::MenuVersion::V1),
         }
     }
 
@@ -112,6 +142,7 @@ impl Cards {
         match self {
             Cards::V1 => V1_DESCRIPTOR,
             Cards::Equity(_) => EQUITY_DESCRIPTOR,
+            Cards::Libratus(_) => LIBRATUS_DESCRIPTOR,
         }
     }
 
@@ -120,6 +151,7 @@ impl Cards {
         match self {
             Cards::V1 => "v1",
             Cards::Equity(_) => "equity-k50",
+            Cards::Libratus(_) => "libratus",
         }
     }
 
@@ -128,6 +160,7 @@ impl Cards {
         match self {
             Cards::V1 => None,
             Cards::Equity(t) => Some(json!({"flop": t.sha256[0], "turn": t.sha256[1], "river": t.sha256[2]})),
+            Cards::Libratus(t) => Some(json!({"turn": t.sha256[0], "river": t.sha256[1], "ochs_map_sha256": LIBRATUS_OCHS_SHA256, "canonicalization": LIBRATUS_CANONICALIZATION})),
         }
     }
 }

@@ -136,7 +136,8 @@ def test_native_evaluator_orders_hands_like_the_engine():
     for _ in range(50000):
         i, j = rng.randrange(len(hands)), rng.randrange(len(hands))
         assert (engine[i] > engine[j]) - (engine[i] < engine[j]) == (native[i] > native[j]) - (native[i] < native[j])
-def test_libratus_manifest_rejects_table_digest_mismatch(tmp_path):
+@pytest.mark.parametrize("ranks", [5, 13])
+def test_libratus_manifest_rejects_table_digest_mismatch(tmp_path, ranks):
     import hashlib
     import json
     from pathlib import Path
@@ -148,7 +149,7 @@ def test_libratus_manifest_rejects_table_digest_mismatch(tmp_path):
     table.write_bytes(raw)
     metadata = {"format": "HU20LIB1", "street": 2, "k": 8, "class_count": 2,
                 "table_sha256": hashlib.sha256(raw).hexdigest(), "total_weight": 2,
-                "ranks": 5, "code_revision": "test", "working_tree_dirty": False,
+                "ranks": ranks, "code_revision": "test", "working_tree_dirty": False,
                 "canonicalization": "hole-current-board-suit-isomorphism-v1", "context": "HU20-menu-V1", "normalization": "runout-count-cdf", "restart_selection": "minimum-full-weighted-objective-first-tie",
                 "feature": "turn-equity-cdf", "bins": 50, "distance": "cdf-l1-sum",
                 "centroid": "weighted-mean", "ochs_map_sha256": "6483f50df6ebd7e51d37353be6040f1c1bfd800907f870991576ae31c8f0a335",

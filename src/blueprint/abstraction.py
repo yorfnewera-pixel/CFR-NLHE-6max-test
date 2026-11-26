@@ -28,6 +28,7 @@ HU200_SCHEMA = "hu200-native-reopening-ordered-history-card-v1"
 HU200_MENU_VERSION = "hu200-min-pot-conditional-jam-native-reopening-v1"
 # The postflop card part is the holding's #163 K=50 bucket; everything else is v1's.
 HU20_EQUITY_SCHEMA = "hu20-native-reopening-ordered-history-equity-k50-v1"
+HU20_LIBRATUS_SCHEMA = "hu20-native-reopening-ordered-history-libratus-v1"
 HU100_EQUITY_SCHEMA = "hu100-native-reopening-ordered-history-equity-k50-v1"
 HU200_EQUITY_SCHEMA = "hu200-native-reopening-ordered-history-equity-k50-v1"
 EQUITY_SCHEMAS = (HU20_EQUITY_SCHEMA, HU100_EQUITY_SCHEMA, HU200_EQUITY_SCHEMA)
@@ -68,6 +69,14 @@ LEGACY_LOOKUP = "legacy-v1"
 BUTTON_ZERO_COMPAT_LOOKUP = "button-zero-compatible-v1"
 LOOKUP_MODES = (LEGACY_LOOKUP, BUTTON_ZERO_COMPAT_LOOKUP)
 RANKS = "23456789TJQKA"
+
+
+def _libratus_card_descriptor(hole, board, tables):
+    if len(board) == 3:
+        return ("flop", equity_buckets.class_key(hole, board))
+    if len(board) not in (4, 5) or tables is None or isinstance(tables, equity_buckets.EquityCards):
+        raise ValueError("Для поздней улицы необходима таблица Libratus")
+    return tables.bucket(hole, board)
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +152,7 @@ def menu_sizes(schema: str) -> str:
 
 def schema_choices(view: Observation, schema: str) -> tuple[Choice, ...]:
     """The menu a native schema's keys were trained with: uncapped raises, no free fold."""
-    if schema not in NATIVE_SCHEMAS and schema not in MENU_V2_SCHEMAS:
+    if schema not in NATIVE_SCHEMAS and schema not in MENU_V2_SCHEMAS and schema != HU20_LIBRATUS_SCHEMA:
         raise ValueError("Only native schemas have a fixed native menu")
     return choices(view, raise_cap=None, free_fold=False, menu_sizes=menu_sizes(schema))
 
@@ -326,16 +335,23 @@ def information_key(
     lookup_mode: str = LEGACY_LOOKUP,
     history_label_overrides: dict[int, str] | None = None,
     equity_cards: equity_buckets.EquityCards | None = None,
+    libratus_cards=None,
 ) -> str:
     """Stable abstract infoset; action labels are part of the key."""
     if view.finished or view.actor != view.seat or not menu:
         raise ValueError("An infoset needs the acting player's live observation")
     if not isinstance(view.history[0], HandStarted):
         raise TypeError("Missing public hand start")
-    if schema not in SUPPORTED_SCHEMAS:
+    if schema not in SUPPORTED_SCHEMAS and schema != HU20_LIBRATUS_SCHEMA:
         raise ValueError("Unknown blueprint abstraction schema")
     if lookup_mode not in LOOKUP_MODES:
         raise ValueError("Unknown blueprint lookup mode")
+    if schema == HU20_LIBRATUS_SCHEMA and (view.capacity != 2 or view.small_blind != 50
+            or view.big_blind != 100 or view.chip_unit != "0.01"
+            or tuple(view.history[0].stacks) != (2000, 2000)):
+        raise ValueError("Схема Libratus поддерживает только HU20 с меню V1")
+    if schema == HU20_LIBRATUS_SCHEMA and menu != schema_choices(view, schema):
+        raise ValueError("Схема Libratus требует меню V1")
     if schema in SHORTSTACK_SEATS and (view.capacity != SHORTSTACK_SEATS[schema] or view.small_blind != 50
                                   or view.big_blind != 100
                                   or view.chip_unit != "0.01"
@@ -345,6 +361,8 @@ def information_key(
     cards = (
         _preflop(view.hole_cards)
         if view.street == Street.PREFLOP
+        else _libratus_card_descriptor(view.hole_cards, view.board, libratus_cards)
+        if schema == HU20_LIBRATUS_SCHEMA
         else (equity_cards if equity_cards is not None else equity_buckets.registered()).bucket(view.hole_cards, view.board)
         if schema in EQUITY_SCHEMAS
         else postflop_v2(view.hole_cards, view.board)
@@ -361,10 +379,10 @@ def information_key(
             (view.players[(view.button + offset) % len(view.players)].folded,
              view.players[(view.button + offset) % len(view.players)].all_in)
             for offset in range(len(view.players))
-        ) if lookup_mode == BUTTON_ZERO_COMPAT_LOOKUP or schema in SHORTSTACK_SEATS else
+        ) if lookup_mode == BUTTON_ZERO_COMPAT_LOOKUP or schema in SHORTSTACK_SEATS or schema == HU20_LIBRATUS_SCHEMA else
         tuple((p.folded, p.all_in) for p in view.players),
         compressed_history(view, history_label_overrides) if schema in HU20_COMPRESSED_SCHEMAS else
-        _history(view, history_label_overrides, menu_sizes(schema)) if schema in (SCHEMA, *SHORTSTACK_SEATS) else _summary_history(view),
+        _history(view, history_label_overrides, menu_sizes(schema)) if schema in (SCHEMA, *SHORTSTACK_SEATS, HU20_LIBRATUS_SCHEMA) else _summary_history(view),
         tuple(item.name for item in menu),
     )
     return blake2b(
