@@ -213,6 +213,71 @@ mod tests {
     use crate::game::{Action, Hand, Kind};
 
     #[test]
+    #[ignore]
+    fn libratus_сквозное_восстановление_проверенных_таблиц() {
+        use crate::cards::LibratusTables;
+        let dir = std::path::PathBuf::from(std::env::var("HU20_LIBRATUS_TEST_DIR").unwrap());
+        assert!(LibratusTables::load(&dir).is_err());
+        let cards = Cards::Libratus(LibratusTables::load_for_test(&dir).unwrap());
+        let mut trainer = Trainer::new(1, 1);
+        trainer.cards = cards;
+        let deck: Vec<u8> = (24..52).chain(0..24).collect();
+        let mut hand = Hand::from_deck_for(Game::Hu20, 0, &deck);
+        hand.core.cards = cards;
+        hand.apply_mut(Action { kind: Kind::Call, raise_to: 0 });
+        hand.apply_mut(Action { kind: Kind::Check, raise_to: 0 });
+        let menu = crate::key::menu(&hand);
+        let choices = menu.as_slice();
+        let names: Vec<_> = choices.iter().map(|choice| choice.name).collect();
+        assert!(names.len() > 1);
+        let key = crate::key::key_bytes(&hand, choices);
+        let mut node = Node::empty(crate::key::code_of(&names), names.len());
+        node.regrets[0] = 1.25;
+        node.average[0] = 2.5;
+        assert!(trainer.table.insert(key, node));
+        let path = dir.join("checkpoint.gz");
+        trainer.save_recoverable(&path, 100, 100).unwrap();
+        let restored = load(&path, Game::Hu20, cards, MenuVersion::V1, None, 100).unwrap();
+        assert_eq!(restored.table.get(&key).unwrap().regrets[0], 1.25);
+        assert!(load(&path, Game::Hu20, cards, MenuVersion::V2, None, 100).err().unwrap().contains("resume menu differs"));
+        let other = std::path::PathBuf::from(std::env::var("HU20_LIBRATUS_OTHER_TEST_DIR").unwrap());
+        let other_cards = Cards::Libratus(LibratusTables::load_for_test(&other).unwrap());
+        assert!(load(&path, Game::Hu20, other_cards, MenuVersion::V1, None, 100).err().unwrap().contains("resume card tables differ"));
+        let resumed_path = dir.join("resumed.gz");
+        restored.save_recoverable(&resumed_path, 100, 100).unwrap();
+        let decode = |path: &std::path::Path| -> Vec<u8> {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            GzDecoder::new(std::fs::File::open(path).unwrap()).read_to_end(&mut bytes).unwrap();
+            bytes
+        };
+        assert_eq!(decode(&path), decode(&resumed_path));
+        let out = dir.join("policy.gz");
+        assert_eq!(crate::export::export(&resumed_path, Some(&out), None, crate::export::ZeroMass::Uniform).unwrap(), 1);
+        let bad = dir.join(format!("подмена-{}", std::process::id()));
+        std::fs::create_dir(&bad).unwrap();
+        for name in ["libratus-turn.bin", "libratus-turn.json", "libratus-river.bin", "libratus-river.json"] {
+            std::fs::copy(dir.join(name), bad.join(name)).unwrap();
+        }
+        let bad_turn = bad.join("libratus-turn.bin");
+        let mut bytes = std::fs::read(&bad_turn).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 1;
+        std::fs::write(&bad_turn, bytes).unwrap();
+        assert!(LibratusTables::load_for_test(&bad).is_err());
+        std::fs::copy(dir.join("libratus-turn.bin"), &bad_turn).unwrap();
+        let manifest = bad.join("libratus-turn.json");
+        let mut data: Value = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+        data["ranks"] = json!(13);
+        std::fs::write(&manifest, serde_json::to_vec(&data).unwrap()).unwrap();
+        assert!(LibratusTables::load(&bad).err().unwrap().contains("unsupported deck"));
+        for name in ["libratus-turn.bin", "libratus-turn.json", "libratus-river.bin", "libratus-river.json"] {
+            std::fs::remove_file(bad.join(name)).unwrap();
+        }
+        std::fs::remove_dir(bad).unwrap();
+    }
+
+    #[test]
     fn libratus_checkpoint_roundtrip_without_training() {
         use crate::cards::LibratusTables;
         use hu20_buckets::LibratusBucketTable;

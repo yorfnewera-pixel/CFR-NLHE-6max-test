@@ -36,6 +36,41 @@ pub struct LibratusTables {
 }
 
 impl LibratusTables {
+    pub fn load(directory: &Path) -> Result<&'static Self, String> {
+        Self::load_verified(directory, false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn load_for_test(directory: &Path) -> Result<&'static Self, String> {
+        Self::load_verified(directory, true)
+    }
+
+    fn load_verified(directory: &Path, small_deck: bool) -> Result<&'static Self, String> {
+        let mut tables = Vec::new();
+        let mut digests = Vec::new();
+        for (street, expected) in [("turn", 2), ("river", 3)] {
+            let path = directory.join(format!("libratus-{street}.bin"));
+            let manifest_path = directory.join(format!("libratus-{street}.json"));
+            let bytes = std::fs::read(&manifest_path).map_err(|e| format!("{}: {e}", manifest_path.display()))?;
+            let manifest: hu20_buckets::LibratusManifest = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            if manifest.ranks != if small_deck { 7 } else { 13 } {
+                return Err(format!("{}: неподдерживаемая колода", manifest_path.display()));
+            }
+            let table = LibratusBucketTable::read_verified(&path, &manifest_path).map_err(|e| e.to_string())?;
+            if std::fs::read(&manifest_path).map_err(|e| e.to_string())? != bytes {
+                return Err(format!("{}: манифест изменился при чтении", manifest_path.display()));
+            }
+            if table.street != expected {
+                return Err(format!("{}: неверная улица", path.display()));
+            }
+            digests.push(manifest.table_sha256);
+            tables.push(table);
+        }
+        let tables = tables.try_into().map_err(|_| "неверное число таблиц")?;
+        let sha256 = digests.try_into().map_err(|_| "неверное число хешей")?;
+        Ok(Box::leak(Box::new(Self { tables, sha256 })))
+    }
+
     #[cfg(test)]
     pub(crate) fn fixture(tables: [LibratusBucketTable; 2], sha256: [String; 2]) -> &'static Self {
         Box::leak(Box::new(Self { tables, sha256 }))

@@ -15,6 +15,7 @@ from src.blueprint.abstraction import (
     SCHEMA,
     HU20_SCHEMA,
     HU20_UNCAPPED_SCHEMA,
+    HU20_LIBRATUS_SCHEMA,
     HU20_COMPRESSED_SCHEMA,
     HU20_COMPRESSED_SCHEMAS,
     HU20_CARD_V2_SCHEMAS,
@@ -129,6 +130,27 @@ def _read(path: Path) -> dict:
 def _checked_schema(document: dict) -> str:
     schema = document.get("abstraction")
     config = document.get("config")
+    if schema == HU20_LIBRATUS_SCHEMA:
+        identity = document.get("identity", {})
+        if not isinstance(identity, dict) or not isinstance(config, dict):
+            raise ValueError("Неверная идентичность схемы Libratus")
+        expected = {"game": HU20_UNCAPPED_GAME, "players": 2, "stacks": [2000, 2000],
+                    "small_blind": 50, "big_blind": 100, "action_menu": HU20_UNCAPPED_MENU_VERSION,
+                    "card_descriptor": "exact-flop-turn-cdf-river-ochs-v1",
+                    "raise_cap_semantics": "none; native minimum-raise/reopening/stack bounds",
+                    "card_tables": identity.get("card_tables")}
+        table = document.get("table", {})
+        player_ids = table.get("player_ids") if isinstance(table, dict) else None
+        if (identity != expected or not isinstance(table, dict) or document.get("format") != HU20_UNCAPPED_FORMAT
+                or config.get("abstraction") != schema or config.get("game") != HU20_UNCAPPED_GAME
+                or config.get("raise_cap", 1) is not None or table.get("stacks") != [2000, 2000]
+                or table.get("small_blind") != 50 or table.get("big_blind") != 100
+                or table.get("chip_unit") != "0.01" or type(table.get("button")) is not int
+                or table.get("button") not in (0, 1) or not isinstance(player_ids, list)
+                or len(player_ids) != 2 or not all(isinstance(p, str) and p for p in player_ids)
+                or player_ids[0] == player_ids[1]):
+            raise ValueError("Идентичность схемы Libratus не совпадает")
+        return schema
     if (
         schema not in SUPPORTED_SCHEMAS
         or not isinstance(config, dict)
@@ -343,8 +365,14 @@ class FrozenBlueprint:
         if sha256(self.data).hexdigest() != spec.sha256:
             raise ValueError("Blueprint export hash mismatch")
         document = _read(path)
-        from src.blueprint.equity_buckets import load_cards
-        self.equity_cards = load_cards(document["abstraction"], document.get("identity", {}), card_buckets)
+        from src.blueprint.equity_buckets import load_cards, load_libratus_cards
+        self.equity_cards = None
+        self.libratus_cards = None
+        if document["abstraction"] == HU20_LIBRATUS_SCHEMA:
+            identity = document.get("identity", {})
+            self.libratus_cards = load_libratus_cards(identity, card_buckets)
+        else:
+            self.equity_cards = load_cards(document["abstraction"], document.get("identity", {}), card_buckets)
         declared = getattr(spec, "abstraction", None)
         if declared is not None and declared != document["abstraction"]:
             raise ValueError("Declared blueprint abstraction differs")
@@ -352,7 +380,7 @@ class FrozenBlueprint:
             raise ValueError("Training checkpoints are not arena policies")
         if spec.format != document["format"]:
             raise ValueError("Checkpoint adapter format differs from inference artifact")
-        if document["format"] in SHORTSTACK_FORMATS.values():
+        if document["format"] in SHORTSTACK_FORMATS.values() and document["abstraction"] != HU20_LIBRATUS_SCHEMA:
             table_data = document["table"]
             table = Table(tuple(table_data["player_ids"]), tuple(table_data["stacks"]),
                           table_data["button"], table_data["small_blind"],
@@ -385,13 +413,14 @@ class FrozenBlueprint:
     def information_key(self, view, menu):
         """The policy owns its schema and tables; process registration cannot change it."""
         return information_key(view, menu, schema=self.abstraction,
-                               equity_cards=getattr(self, "equity_cards", None))
+                               equity_cards=getattr(self, "equity_cards", None),
+                               libratus_cards=getattr(self, "libratus_cards", None))
 
     def distribution(self, view):
         if view.capacity != self.players:
             raise ValueError("Blueprint table size differs from the evaluation table")
         menu = choices(view, raise_cap=self.raise_cap,
-                       free_fold=self.abstraction not in SHORTSTACK_SEATS,
+                       free_fold=self.abstraction not in (*SHORTSTACK_SEATS, HU20_LIBRATUS_SCHEMA),
                        menu_sizes=menu_sizes(self.abstraction))
         key = self.information_key(view, menu)
         saved = self.entries.get(key)

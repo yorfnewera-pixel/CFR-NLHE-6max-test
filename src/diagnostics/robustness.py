@@ -85,6 +85,10 @@ class LocalBestResponse:
     budget. The campaign's external deadline/RSS guard is always authoritative.
     """
     def __init__(self, source, seed, config=LBRConfig()):
+        from src.blueprint.abstraction import HU20_LIBRATUS_SCHEMA
+        if (getattr(source, "abstraction", None) == HU20_LIBRATUS_SCHEMA
+                or getattr(getattr(getattr(source, "trainer", None), "config", None), "abstraction", None) == HU20_LIBRATUS_SCHEMA):
+            raise ValueError("LBR не поддерживает схему Libratus")
         self.source, self.random, self.config = source, Random(seed), config
         self.holdings = None
         self.weights = None

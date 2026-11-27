@@ -217,6 +217,50 @@ class EquityCards:
         return self.tables[STREETS[len(board)]].bucket(hole, board)
 
 
+def _require_libratus_production_deck(manifest):
+    if manifest.get("ranks") != 13:
+        raise ValueError("Рабочая схема Libratus требует полную колоду")
+
+
+class LibratusCards:
+    def __init__(self, directory):
+        import json
+
+        self.tables = {}
+        self.sha256 = {}
+        for street in ("turn", "river"):
+            path = Path(directory) / f"libratus-{street}.bin"
+            manifest_path = Path(directory) / f"libratus-{street}.json"
+            manifest_bytes = manifest_path.read_bytes()
+            manifest = json.loads(manifest_bytes)
+            _require_libratus_production_deck(manifest)
+            table = LibratusBucketTable(path, manifest_path)
+            if manifest_path.read_bytes() != manifest_bytes:
+                raise ValueError("Манифест изменился при чтении")
+            if table.street != street:
+                raise ValueError("Улица таблицы не совпадает с именем")
+            self.tables[street] = table
+            self.sha256[street] = manifest["table_sha256"]
+        self.identity = {**self.sha256,
+                         "ochs_map_sha256": "6483f50df6ebd7e51d37353be6040f1c1bfd800907f870991576ae31c8f0a335",
+                         "canonicalization": "hole-current-board-suit-isomorphism-v1"}
+
+    def bucket(self, hole, board):
+        street = {4: "turn", 5: "river"}.get(len(board))
+        if street is None:
+            raise ValueError("Таблицы Libratus поддерживают только turn и river")
+        return self.tables[street].bucket(hole, board)
+
+
+def load_libratus_cards(identity, directory):
+    if directory is None:
+        raise ValueError("Для схемы Libratus необходимы таблицы")
+    cards = LibratusCards(directory)
+    if identity.get("card_tables") != cards.identity:
+        raise ValueError("Идентичность таблиц Libratus не совпадает")
+    return cards
+
+
 def load_cards(schema, identity, directory):
     """Bind a reader to explicitly supplied, pinned, memory-mapped tables.
 

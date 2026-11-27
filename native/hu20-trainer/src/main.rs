@@ -5,6 +5,11 @@ mod cli;
 /// `--card-buckets DIR` keys cards by #163's K=50 equity tables; `--card-tables-unpinned`
 /// admits other tables, for test fixtures only. v1 cards otherwise.
 fn card_option(args: &[String]) -> hu20_trainer::cards::Cards {
+    if let Some(i) = args.iter().position(|a| a == "--libratus-buckets") {
+        let tables = hu20_trainer::cards::LibratusTables::load(std::path::Path::new(&args[i + 1]))
+            .unwrap_or_else(|problem| panic!("{problem}"));
+        return hu20_trainer::cards::Cards::Libratus(tables);
+    }
     match args.iter().position(|a| a == "--card-buckets") {
         None => hu20_trainer::cards::Cards::V1,
         Some(i) => {

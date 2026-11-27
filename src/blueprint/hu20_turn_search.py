@@ -87,7 +87,9 @@ class HU20TurnSearchPolicy:
 
     @staticmethod
     def _validate_blueprint(blueprint):
-        from src.blueprint.abstraction import EQUITY_SCHEMAS, MENU_V2_SCHEMAS
+        from src.blueprint.abstraction import EQUITY_SCHEMAS, MENU_V2_SCHEMAS, HU20_LIBRATUS_SCHEMA
+        if getattr(blueprint, "abstraction", None) == HU20_LIBRATUS_SCHEMA:
+            raise ValueError("Поиск не поддерживает схему Libratus")
         if getattr(blueprint, "abstraction", None) in MENU_V2_SCHEMAS:
             raise ValueError("Search does not support menu-v2 schemas")
         if getattr(blueprint, "abstraction", None) in EQUITY_SCHEMAS:

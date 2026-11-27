@@ -32,7 +32,9 @@ class LiveBlueprint:
     def __init__(self, trainer, *, lookup_mode: str = LEGACY_LOOKUP,
                  checkpoint_sha256: str | None = None,
                  lineage: dict | None = None):
-        from src.blueprint.abstraction import EQUITY_SCHEMAS, MENU_V2_SCHEMAS
+        from src.blueprint.abstraction import EQUITY_SCHEMAS, MENU_V2_SCHEMAS, HU20_LIBRATUS_SCHEMA
+        if trainer.config.abstraction == HU20_LIBRATUS_SCHEMA:
+            raise ValueError("Поиск не поддерживает схему Libratus")
         if trainer.config.abstraction in MENU_V2_SCHEMAS:
             raise ValueError("Live search blueprints do not support menu-v2 schemas")
         if trainer.config.abstraction in EQUITY_SCHEMAS:
@@ -316,7 +318,9 @@ class SearchPlayer:
     """Bounded public-range search with unchanged blueprint fallback."""
 
     def __init__(self, blueprint, seed: int, config: SearchConfig = SearchConfig()):
-        from src.blueprint.abstraction import EQUITY_SCHEMAS, MENU_V2_SCHEMAS
+        from src.blueprint.abstraction import EQUITY_SCHEMAS, MENU_V2_SCHEMAS, HU20_LIBRATUS_SCHEMA
+        if getattr(blueprint, "abstraction", None) == HU20_LIBRATUS_SCHEMA:
+            raise ValueError("Поиск не поддерживает схему Libratus")
         if getattr(blueprint, "abstraction", None) in MENU_V2_SCHEMAS:
             raise ValueError("Search does not support menu-v2 schemas")
         if getattr(blueprint, "abstraction", None) in EQUITY_SCHEMAS:

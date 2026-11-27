@@ -2,7 +2,7 @@
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
-const CARDS: &[&str] = &["--card-buckets", "--card-tables-unpinned"];
+const CARDS: &[&str] = &["--card-buckets", "--card-tables-unpinned", "--libratus-buckets"];
 const TRAIN: &[&str] = &["--nodes", "--iterations", "--seed", "--roots-per-seat", "--out", "--milestones",
     "--stack-bb", "--max-entries", "--max-seconds", "--stop-file", "--telemetry", "--resume",
     "--resume-sha256", "--completed-nodes", "--average-rule", "--regret-floor", "--recovery", "--menu", "--freeze-at-cap", "--fast-gzip"];
@@ -147,6 +147,16 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     if supplied.contains_key("--card-tables-unpinned") && !supplied.contains_key("--card-buckets") {
         return Err("--card-tables-unpinned requires --card-buckets".into());
     }
+    if supplied.contains_key("--libratus-buckets") {
+        if command != "train" && command != "parity" {
+            return Err("схема Libratus не поддерживается этой командой".into());
+        }
+        if supplied.contains_key("--card-buckets") || supplied.contains_key("--card-tables-unpinned")
+            || supplied.get("--menu").map_or(false, |v| v != "v1")
+            || supplied.get("--stack-bb").map_or(false, |v| v != 20) {
+            return Err("схема Libratus поддерживает только HU20 и меню V1".into());
+        }
+    }
     if command == "train" {
         let resume = supplied.contains_key("--resume");
         if resume != supplied.contains_key("--resume-sha256") {
@@ -241,6 +251,17 @@ mod tests {
         let c = parse(&args("train --menu v2 --stack-bb 100")).unwrap();
         assert_eq!(c.config["options"]["menu"], "v2");
         assert_eq!(c.config["options"]["average_rule"], "traverser-reach");
+    }
+    #[test]
+    fn libratus_принимает_только_hu20_v1() {
+        assert!(parse(&args("train --libratus-buckets dir")).is_ok());
+        assert!(parse(&args("parity fixture --libratus-buckets dir")).is_ok());
+        for command in ["train --libratus-buckets dir --menu v2",
+                        "train --libratus-buckets dir --stack-bb 100",
+                        "train --libratus-buckets dir --card-buckets other",
+                        "bench-train --libratus-buckets dir --roots r --seed 1 --iterations 2 --lineage 1 --out out"] {
+            assert!(parse(&args(command)).is_err(), "{command}");
+        }
     }
     #[test]
     fn resolves_schedule_and_lineage_with_requested_values_retained() {
